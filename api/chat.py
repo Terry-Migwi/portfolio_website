@@ -3,6 +3,8 @@ import json
 import os
 import urllib.request
 import urllib.error
+from dotenv import load_dotenv
+load_dotenv()
 
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 PINECONE_API_KEY   = os.environ.get("PINECONE_API_KEY")
@@ -66,11 +68,18 @@ def build_context(matches: list) -> str:
 
 
 def call_claude(messages: list, context: str) -> str:
-    system_prompt = f"""You are an assistant on Terry Migwi's portfolio website. Your job is to answer questions about Terry's projects only, using the retrieved context below.
+    system_prompt = f"""You are an assistant on Terry Migwi's portfolio website. Your job is to answer questions about Terry's projects using the retrieved context below.
 
 If someone asks about anything outside of these projects, including Terry's personal background, availability, salary, or anything else not covered in the context, respond with: "I am sorry, I do not have an answer for that. Feel free to contact Terry."
 
 Do not make up any information not present in the context. Keep responses concise and professional.
+
+Portfolio overview:
+This portfolio contains four projects:
+1. Denta — a production-grade messaging assistant with RAG and tool calling for bookings, built for a dental clinic but designed for any business taking bookings over a messaging channel.
+2. Hybrid Search — a production-ready document search engine combining semantic search and keyword search with LLM answer synthesis, secured with JWT authentication.
+3. TournamentIQ — a live AI match intelligence platform built on 2026 FIFA World Cup data, combining Elo ratings, Poisson probability modelling, Bayesian inference, and LangGraph orchestration to generate narrative match intelligence briefs.
+4. Attendance Tracker — a Python automation that reduced weekly learner attendance tracking from 2 hours to under 10 minutes.
 
 Retrieved context:
 {context}"""
