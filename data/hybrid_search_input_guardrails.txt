@@ -1,0 +1,80 @@
+﻿Input Guardrails: Catching Out-of-Scope Queries Before the Pipeline Runs
+This article documents how I added an input guardrail to the semantic search pipeline, and what the results looked like against real queries.
+1. Scene
+A guardrail is a check that keeps a system's behaviour inside an intended boundary. In AI engineering, guardrails are used to enforce scope, ensuring a system only does what it was built to do, and responds clearly when a request falls outside that boundary.
+Guardrails appear in a wide range of AI systems. A customer support chatbot that answers questions about a company's products needs a guardrail to prevent it from giving general life advice. A medical triage assistant needs a guardrail to prevent it from answering questions about cooking or travel. A legal document search system needs a guardrail to prevent it from being used as a general knowledge tool. In each case the guardrail's job is the same: intercept requests that do not belong to the system before any expensive or risky processing runs.
+There are two points in a pipeline where a guardrail can be applied. The first is at the output, where the system runs in full, produces an answer, and a separate check evaluates whether the answer is appropriate before it is returned to the user. The second is at the input, where the query is evaluated before the pipeline runs at all, and irrelevant queries are rejected immediately with a clear message.
+I built an input guardrail for this proposal search engine using a forced tool call classifier. Every query passes through the guardrail before hybrid search, re-ranking, or Claude are invoked. Queries that relate to East African business proposals proceed normally. Queries that do not receive a redirect message explaining what the system does and how to use it correctly.
+2. Problem
+This pipeline makes three external API calls for every query: a HuggingFace embedding call to encode the query as a dense vector, a Pinecone query to retrieve the most relevant chunks using both dense and sparse vectors, and a Claude API call to synthesise an answer from the retrieved content. Each of these calls has a cost in latency, in compute, and in API spend. Running all three against a query asking for a beef stew recipe, or the capital of France, or the latest football scores, produces no useful result and burns real resources doing it.
+Beyond cost, there is a user experience problem. A search engine with a defined corpus should tell a user clearly when their query is outside its scope. Returning empty results or a hallucinated answer to an irrelevant query is a worse experience than an immediate, honest message that says what the system covers and how to ask a question it can actually answer.
+Output checking does not solve either problem. If the guardrail runs after the pipeline, all three API calls have already been made. The cost is already spent. The latency has already been added to the user's wait time. An output check can prevent a bad answer from being returned, but it cannot recover the resources already consumed to produce it. Input checking stops irrelevant queries before any of that cost is incurred, and gives the user a redirect message at the point where it is most useful, before they wait for a result that was never going to be relevant.
+3. Approach
+The guardrail is a function that runs before the endpoint handler executes. It is called at the top of each endpoint handler so that if it raises an exception, the handler never proceeds to the pipeline. This intercepts the request at the earliest possible point in the flow.
+The classifier uses a forced tool call. A small Claude Haiku call receives the query text and a single tool with a boolean field. The tool choice is forced, meaning the model cannot return free text. It must return a structured result matching the tool's schema. This guarantees a parseable boolean on every call regardless of query phrasing.
+
+
+_SCOPE_TOOL = [{
+    "name": "classify_query",
+    "description": (
+        "Determine whether this query is relevant to a corpus of "
+        "East African business proposals. When in doubt, classify "
+        "as in scope."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "in_scope": {"type": "boolean"},
+            "reason":   {"type": "string"}
+        },
+        "required": ["in_scope", "reason"],
+    },
+}]
+
+
+The scope definition passed to the model covers the full range of topics in the corpus: business proposals, funding, sectors, locations, organisations, technologies, business models, impact metrics, team backgrounds, and partnerships. The instruction "when in doubt, classify as in scope" is explicit in both the tool description and the system prompt. This sets the failure mode direction toward permissiveness. A query on the boundary is let through rather than blocked. A guardrail that blocks legitimate queries is more damaging than one that occasionally lets an irrelevant query through.
+When the classifier returns in_scope: false, the function raises an HTTP 400 with a redirect message rather than a generic error:
+
+
+_REDIRECT_MESSAGE = (
+    "This system searches East African business proposals. "
+    "Your query does not appear to relate to that corpus. "
+    "Try asking about funding amounts, sectors, organisations, "
+    "technologies, or specific proposals covering areas such as "
+    "agriculture, fintech, renewable energy, logistics, or healthcare."
+)
+
+
+The failure mode for the classifier call itself, a timeout, an API error, or any exception, defaults to letting the request through. A broken guardrail should never block legitimate traffic. The safer default when the check cannot run is to assume the query is in scope.
+The guardrail is called directly at the top of each endpoint handler rather than as a FastAPI dependency injection. FastAPI's dependency injection system cannot resolve the same parsed request body in both a dependency and a handler simultaneously, which caused a 422 Unprocessable Entity error on every request during testing. Calling the function directly inside the handler avoids that conflict while preserving the same behaviour. The check runs before any pipeline code, and a raised exception stops execution immediately.
+
+
+@app.post("/search", response_model=SearchResponse)
+def search(request: SearchRequest):
+    check_query_scope(request.query)
+    # pipeline runs only if check did not raise
+    ...
+
+
+The except HTTPException: raise block in each handler ensures that the 400 raised by the guardrail is not caught and swallowed by the outer except Exception handler, which would convert it into a 500 and lose the redirect message.
+4. Results
+Three queries tested the guardrail against the three scenarios it needs to handle correctly.
+In-scope query: which proposals focus on renewable energy?
+The classifier returned in_scope: true. The full pipeline ran. Three results were returned with hybrid search scores and a synthesised answer from Claude. The guardrail added one small Claude Haiku call to the request latency and did not affect the results in any way.
+Edge case: what is the capital of Kenya?
+The classifier returned in_scope: false. Nairobi appears by name in several proposals in the corpus, and a weaker classifier might have let this through on the basis of the geographic overlap. The classifier correctly identified it as a general knowledge question rather than a proposal query. The redirect message was returned immediately with no embedding call, no Pinecone query, and no Claude generation call.
+Out-of-scope query: what is the best recipe for beef stew?
+The classifier returned in_scope: false. The redirect message was returned immediately. No pipeline cost was incurred.
+The redirect message as it appears in the frontend:
+
+
+This system searches East African business proposals. Your query
+does not appear to relate to that corpus. Try asking about funding
+amounts, sectors, organisations, technologies, or specific proposals
+covering areas such as agriculture, fintech, renewable energy,
+logistics, or healthcare.
+
+
+The capital of Kenya result is the most useful finding. It shows the classifier making a non-trivial distinction, a query that has a geographic connection to the corpus but is not a proposal query, correctly, without requiring any special handling or additional prompt engineering.
+5. Key Takeaway
+An input guardrail is the correct place to enforce scope on a search pipeline with a defined corpus. Checking at the input rather than the output prevents pipeline costs from being incurred on irrelevant queries, gives users a useful redirect message at the earliest possible point, and keeps the pipeline itself focused on the queries it was built to answer. The forced tool call pattern guarantees a parseable classification on every query regardless of phrasing, and defaulting to in scope on classifier failure ensures the guardrail never becomes a source of false blocks on legitimate traffic.

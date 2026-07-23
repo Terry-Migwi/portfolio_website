@@ -1,0 +1,39 @@
+﻿main.py: How Denta's Pieces Fit Together
+This article documents main.py as the coordination layer of the project, the one file every request passes through, where tool calling, RAG, session management, structured extraction, background tasks, and anomaly detection all have to cooperate without stepping on each other.
+1. Scene
+main.py is the FastAPI application itself, the file that turns everything documented in this series into something that actually receives real HTTP requests over the internet. It defines the endpoints, the specific URLs a request can arrive at, and for each one, what code runs in response.
+Every message Denta receives, whether from the WhatsApp/SMS webhook or the browser demo, passes through exactly one file first, main.py. It doesn't contain the RAG chain, the booking agent, the session store, or the anomaly checks. It imports all of them and decides, for a given incoming message, which ones get called, in what order, and what happens if one of them fails.
+/sms-webhook is what Africa's Talking calls whenever a patient sends a WhatsApp or SMS message to the clinic's number. It's a webhook, meaning Denta doesn't reach out to check for new messages itself, Africa's Talking pushes each one to this URL the moment it arrives. This endpoint is a POST request, because Africa's Talking needs to send data, the patient's message text, their phone number, along with the call, not just ask for something back.
+/chat is the second entry point, reached by someone typing directly into a web page instead of sending a text message. It's also a POST request, for the same reason, the patient's message and a session identifier need to travel with the request, not just be part of the URL. /chat doesn't exist on its own, it's called by index.html, a small web page main.py serves directly, giving the assistant a visual, browsable frontend rather than requiring a real WhatsApp number and Africa's Talking's sandbox restrictions to try it. This is what makes the project demoable from a browser link, and why /chat became the primary surface for both the live portfolio demo and the concurrency testing covered in that article.
+main.py also serves a small number of GET requests, /health and the route that returns index.html itself. A GET request asks a server for something back, a page, a status, with no meaningful data attached to the request itself, exactly what a browser does just by visiting a URL. Nothing needs to be sent in for the server to respond, which is why these two routes are GET rather than POST.
+2. Why It Exists
+This system contains several different working parts, a RAG system, tool calling, structured extraction and orchestration, session management, and anomaly detection. Each one is documented separately in this series, and each one works correctly on its own. None of them, on their own, knows the incoming message even exists. Something has to receive the request, decide which of these parts should handle it, and pass the right information to the right part in the right order.
+FastAPI, and main.py specifically, is where that has to happen, because it's the only layer with visibility into the whole system at once. The RAG chain doesn't know the booking agent exists. The booking agent doesn't know the anomaly check exists. main.py knows about all of them, which makes it the only place capable of coordinating them into a single coherent reply to a single incoming message.
+3. Approach
+Startup: what the tables are for
+I created two database tables before the app starts accepting traffic. The interactions table stores every confirmed booking, the service, the appointment time, and the patient's phone number, the record structured extraction produces once a booking completes. The anomalies table stores every flagged reply from the groundedness and scope checks, covered in full in that article.
+Intent classifier
+Every incoming message could be a question, a booking request, or something entirely outside either. I use intent classification to decide, before anything else runs, which of three specialized handlers should process a given message, one small, cheap model call at the very top of the flow that labels a message before anything expensive happens.
+The three handlers
+Once I know the intent, one of three functions produces the reply.
+_handle_booking handles anything involving scheduling, an appointment, a cancellation, checking availability. I built this as a LangGraph agent, covered fully in the Tool Calling article.
+_handle_faq answers questions the clinic's own documents can address, pricing, hours, services, policies, the RAG chain covered in the RAG article.
+_handle_general answers everything else still reasonable for a dental assistant to address, no retrieval, no tools, just the model answering directly.
+I built three different jobs with three different amounts of machinery, and intent classification decides which one a given message actually needs.
+After a reply is ready
+Once a handler produces a reply, I schedule any background work the booking path needs, extraction, logging, reminder scheduling, covered in the orchestration article, then run the reply through the anomaly check before it goes out, covered in that article. I placed this check at the very end of the flow because it's the one point in main.py that touches every reply, no matter which handler produced it.
+4. Results: tracing one real message through the file
+Take a single incoming booking confirmation and follow it through main.py exactly as it executes, not as the file is written top to bottom.
+1. Request lands at /sms-webhook. Webhook secret checked first.
+2. confirmed set to false as a safe default before anything else runs.
+3. Active booking session checked, true, since this patient is mid-booking. Classifier never runs this turn.
+4. Booking handler invoked. LangGraph agent reasons, calls the booking tool, gets a real tool result back.
+5. Confirmation detection reads that raw tool result, not the model's reply text, confirmed is now true.
+6. Background side effects scheduled, not run yet.
+7. Booking session cleared, this conversation is done.
+8. Anomaly check runs inline. The reply claims completion, tool confirmation is also true, no mismatch, nothing logged.
+9. Reply sent. Patient has their confirmation.
+10. Only now, after the response, does the background task actually run, extraction, logging, reminder scheduling.
+Ten steps, six different subsystems, each one documented in its own article, none of them aware of the others' internals, all of them correctly sequenced by this one file.
+5. Key Takeaway
+main.py's entire job is sequencing. It decides what runs before what, what waits for what, and what every reply has to pass through no matter which path produced it. That sequencing works here because it's explicit and centralized in one file rather than assumed or scattered across the subsystems themselves, no individual handler has to know about the others, they only have to trust that main.py calls them in the right order. Correctness at the level of individual components doesn't add up to correctness at the level of the system, someone, or something, has to own the sequencing, and that ownership has to be explicit, not assumed.

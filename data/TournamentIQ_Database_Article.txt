@@ -1,0 +1,251 @@
+﻿TournamentIQ — Building the Data Foundation
+TournamentIQ is an intelligent system that tracks team strength using live 2026 FIFA World Cup data. This article discusses how the database and codebase for TournamentIQ were built, the decisions made, and the challenges found along the way.
+1. Sourcing the Data
+This project pulls from two APIs, for two different reasons.
+football-data.org is the primary source for the live 2026 data, scores, fixtures, schedules, and league tables. The free tier gives 10 calls per minute, enough for this project, but scores can lag behind the real result for a short window, which is what caused the null score bug described later in this document.
+api-football.com was the original choice, but its free tier does not carry 2026 World Cup data at all. It was kept for 2022 data instead, used for backtesting the Elo system. Its free tier covers one hundred requests a day and includes top scorers, which the other API does not, worth keeping in mind for the chatbot later, since who is the top scorer is a realistic question to get asked.
+Using the data from the api, I created two separate databases, worldcup.db and worldcup_2026.db. One challenge of using two APIs is that they use different team id systems, so mixing their data in one table would break every foreign key relationship the moment a 2022 team id collided with an unrelated 2026 one. Splitting them avoids that entirely, at the cost of duplicating the schema across two files.
+2. Building the Database
+2.1 Data
+The schema for worldcup_2026.db is defined in models_2026.py using SQLAlchemy, an ORM that maps Python classes to database tables. Four tables make up this database.
+Team
+Holds static information about each of the 48 participating teams.
+Field
+	Type / Key
+	Description
+	id
+	Primary key, integer
+	Not auto-incrementing, comes directly from football-data.org's own team id
+	name
+	String
+	The team's full name
+	tla
+	String
+	Three-letter abbreviation
+	founded
+	Optional, integer
+	Year the team or federation was founded
+	crest
+	String
+	URL to the team's crest image
+	venue
+	Optional, string
+	Home venue
+	
+
+
+
+Match
+Holds one row per fixture across the tournament.
+Field
+	Type / Key
+	Description
+	id
+	Primary key, integer
+	Not auto-incrementing, comes directly from football-data.org
+	home_team_id
+	Optional, foreign key
+	References Team.id
+	away_team_id
+	Optional, foreign key
+	References Team.id
+	season
+	Integer
+	The tournament year
+	stage
+	String
+	The round the match belongs to, for example group stage or quarterfinal
+	matchday
+	Optional, integer
+	Matchday number within the stage
+	date
+	Optional, string
+	Kickoff date and time
+	status
+	String
+	Match state as reported by the API, for example SCHEDULED or FINISHED
+	duration
+	Optional, string
+	REGULAR or PENALTY_SHOOTOUT
+	home_goals
+	Optional, integer
+	Final goals scored by the home team
+	away_goals
+	Optional, integer
+	Final goals scored by the away team
+	home_goals_ht
+	Optional, integer
+	Half-time score, home team
+	away_goals_ht
+	Optional, integer
+	Half-time score, away team
+	
+
+home_team_id and away_team_id are optional because a fixture can exist in the API before both teams are confirmed for it. home_goals and away_goals are optional for the same reason a match can be scheduled before it is played, and because a finished match can briefly return a missing score before football-data.org backfills it.
+
+
+
+
+GroupStanding
+Holds one row per team, recalculated after every result rather than updated incrementally.
+Field
+	Type / Key
+	Description
+	team_id
+	Primary key, foreign key
+	References Team.id
+	group_name
+	String
+	The group the team belongs to
+	position
+	Integer
+	The team's rank within its own group, from 1 to 4
+	played
+	Integer
+	Matches played
+	won
+	Integer
+	Matches won
+	drawn
+	Integer
+	Matches drawn
+	lost
+	Integer
+	Matches lost
+	points
+	Integer
+	Total points
+	goals_for
+	Integer
+	Goals scored
+	goals_against
+	Integer
+	Goals conceded
+	goals_diff
+	Integer
+	Goals for minus goals against
+	form
+	Optional, string
+	Last five results, as a sequence of W, D, or L
+	
+
+team_id is the primary key because a team only ever has one current standing. This was a schema fix. The table originally used its own auto-incrementing id as primary key, with team_id as a plain foreign key, which meant repeat ingestion runs inserted a new row for each team instead of updating the existing one.
+EloRating
+Holds one row per team per match, recording the rating before and after that match.
+Field
+	Type / Key
+	Description
+	id
+	Primary key, auto-incrementing
+	Internal row identity
+	team_id
+	Foreign key
+	References Team.id
+	match_id
+	Foreign key
+	References Match.id
+	stage
+	String
+	The round the match belongs to
+	rating_before
+	Float
+	Team's rating before this match
+	rating_after
+	Float
+	Team's rating after this match
+	
+
+Elo has its own table rather than being folded into GroupStanding so that the full rating history stays queryable, not just the current number, and so a change to the rating formula is a schema change in one table rather than the three tables.
+Why SQLite
+This project uses SQLite for both databases, worldcup.db and worldcup_2026.db.
+SQLite and not Postgres 
+Postgres is a server-based database that is not necessary for this project at the moment.
+SQLite stores the entire database as a single file on disk, with no separate server process to install, configure, or keep running. This project runs from a local machine, with only the author reading and writing into it. Postgres requires additional setup that is not necessary at this stage. Postgres becomes the better choice once a database needs to support multiple concurrent writers, network access from more than one machine, or schema features SQLite does not have, none of which this project currently needs.
+What are the trade offs?
+SQLite handles concurrent writes poorly, it locks the entire database file during a write. In future, when this project moves to a live deployment where ingestion, recompute, and the chatbot are all writing at the same time, that will be a reasonable point to migrate to Postgres.
+worldcup_2026.db, teams table
+  
+
+Figure 1. The teams table in worldcup_2026.db, 48 rows, one per participating team.
+
+
+
+
+worldcup.db, teams table
+  
+
+Figure 2. The teams table in worldcup.db, 32 rows, one per participating team in the 2022 tournament.
+2.2 Intelligence
+elo.py
+This script holds the Elo formula as a set of pure functions, meaning none of them connects to the database. The same functions run identically for the 2022 backtest and for live 2026 ratings.
+Expected outcome
+Before each match, the system calculates the probability that each team will win. This is called the expected score.
+E(A) = 1 / (1 + 10 ^ ((R(B) - R(A)) / 400))
+Where:
+* E(A) is the expected score for Team A
+* R(A) is Team A's current rating
+* R(B) is Team B's current rating
+* 400 is a scaling constant that controls the steepness of the probability curve
+
+
+The 400 constant was standardised in chess and inherited by most Elo systems. It controls how steep the probability curve is between two teams. Here is what different rating gaps produce:
+New rating
+The new Elo rating is calculated after every match based on what actually happened versus what was expected.
+New Rating = Old Rating + K x G x (W - E(A))
+Where:
+* W is the actual result. Win = 1.0, draw = 0.5, loss = 0.0
+* Penalty shootout winner: W = 0.75
+* Penalty shootout loser: W = 0.5
+
+
+K is the sensitivity factor — how much a single match can move the rating. It increases in later rounds because higher-stakes matches carry more weight.
+* Group stage: K = 32
+* Last 32: K = 40
+* Round of 16 and Quarterfinals: K = 50
+* Semifinals, Final, and 3rd place: K = 60
+
+
+G is the goal difference multiplier. Bigger wins earn a larger multiplier, so the system rewards dominance rather than just results.
+* Win by 0 or 1 goals: G = 1.0
+* Win by 2 goals: G = 1.5
+* Win by 3 or more goals: G = 1.75
+* Penalty shootout: G = 1.0 (penalties are not a measure of dominance)
+run_elo_2026.py
+This script computes Elo ratings for every finished match in worldcup_2026.db, in chronological order, and writes the result of each match to elo_ratings.
+The script queries matches for every row where status is FINISHED, both team ids are present, and both goal values are present. This filter excludes any match marked finished with a missing score, which football-data.org's free tier occasionally returns before the real score backfills.
+The script holds each team's current rating in memory during the run, in a dictionary keyed by team id. A team is added to the dictionary the first time it appears, starting at the baseline rating of 1000.
+The script then processes each match in order. For each match, it looks up both teams' current ratings, determines the stage's K value and the match's G value, determines W for both teams based on the result, and calculates each team's expected score using the expected score formula. It then calculates each team's new rating using the new rating formula, and writes both the rating before and the rating after to elo_ratings for each team. The in-memory ratings are then updated to the new values before the script moves to the next match, so later matches use each team's most current rating.
+This script has no guard against being run more than once. It contains no delete step before writing, so running it twice writes every match's rating a second time, duplicating every row in elo_ratings. For routine recomputation, recompute.py is the correct script to run, since it clears elo_ratings before rebuilding it. run_elo_2026.py should be treated as a one-time or manual use script only.
+recompute.py
+This script rebuilds three things after a match result becomes available, a team's recent form, a team's standings, and Elo ratings for every team. All three outputs are written to worldcup_2026.db, form and standings to group_standings, ratings to elo_ratings.
+The script recalculates standings from matches directly, rather than copying the standings already calculated by football-data.org's own API. A separate process, schedule.py, ingests football-data.org's standings daily, so the two are independent sources for the same numbers, and they can briefly disagree until recompute.py runs.
+compute_form
+This function returns a team's results from its last five finished matches as a string, for example WWDLW. It queries matches for the team's finished matches with both scores present, newest first, limited to the form window. For each match, it checks whether the team played at home or away, to know which goal column to compare against the other. The result is appended to a list as W, L, or D. Since the query returns matches newest first but a form string reads oldest to newest, the list is reversed before being joined into the final string.
+update_standings
+This function recalculates one team's full standings line, played, won, drawn, lost, points, goals for, and goals against, and writes it to group_standings.
+The function first runs a single SQL query that aggregates every finished match the team played, home or away, into the six counts a standings table needs. Because a team's result can be in either the home columns or the away columns of a match row depending on which side they played, each count is built from two conditions joined with OR, one for each side. For example, a win is counted if the team was home and scored more, or if the team was away and scored more.
+Each SUM in this query is wrapped in COALESCE(..., 0). SUM returns NULL when there are no matching rows to sum, rather than 0. Without COALESCE, a team with no finished matches yet would have its counts come back as None, which would break any code downstream that expects an integer. COALESCE replaces that NULL with 0, so a team with no matches returns a clean zero across all six counts instead.
+
+
+The aggregated row is returned as a single tuple and unpacked into six named variables. This unpacking depends on the SELECT statement's column order matching exactly, since the values are assigned to names by position, not by column name.
+Points and goal difference are calculated in Python from these unpacked values, not pulled from the database. Points are won multiplied by three, plus drawn. Goal difference is goals_for minus goals_against.
+The points formula follows standard football scoring, not anything derived from Elo. A win is worth three points, a draw is worth one, a loss is worth none, the rule used across most football competitions worldwide. This means a team's points total will not always be a multiple of three, a team that has only drawn its matches so far will show points equal to its draw count, for example one point after a single drawn opener.
+The function then calls compute_form to get the team's form string, and writes all of these values to group_standings with a SQL UPDATE statement, matched on team_id. This is an update, not an upsert, it assumes a row for the team already exists. This is safe because team_id is the primary key on GroupStanding, and ingestion always creates one row per team before this function runs.
+recompute_elo
+This function recalculates Elo ratings for every team, using the same logic as run_elo_2026.py. Unlike that script, it first deletes every row in elo_ratings before recomputing, so each run produces a clean, complete rebuild with no leftover rows from a previous run.
+run_post_match_recompute
+This is the function that runs when recompute.py is executed directly. It calls update_standings once for every team that has a row in group_standings, then calls recompute_elo once to rebuild all ratings, then commits both sets of changes together in a single transaction. It finishes by printing the current top ten teams by rating, as a manual check that the output looks reasonable.
+recompute_elo has no commit of its own. It depends on run_post_match_recompute to commit the session after it runs. Calling recompute_elo on its own, outside of run_post_match_recompute, would compute new ratings correctly but never save them to the database.
+2.3 Automation
+scheduler.py
+This script runs ingestion on a daily schedule, using APScheduler. At midnight UTC, it calls ingest_teams.py, ingest_standings.py, and ingest_matches.py in sequence.
+This script ingests data only. It does not call recompute.py. This means group_standings and elo_ratings, the tables this project derives from its own match data, are not currently refreshed automatically. They are only updated when recompute.py is run manually. Whether to add a call to run_post_match_recompute into this daily schedule, so derived standings and ratings update automatically alongside ingestion, is an open decision.
+3. Data Quality Checks
+Three data quality issues came up while pulling insights out of the live 2026 data while querying the data.
+3.1 Incomplete Data: A Finished Match With No Scores
+Canada vs Bosnia-Herzegovina showed status = FINISHED but both goal columns were null. ingest_matches_2026.py reads the score straight from the API response with no check: entry["score"]["fullTime"]["home"], so when football-data.org returned a finished match with a temporarily missing score, the script wrote the null through without complaint. Nothing crashed. The bad row simply sat there, silently wrong, until it was queried for directly. The fix skips any finished match with a missing score during ingestion rather than writing it, so it gets picked up correctly on the next poll once the real score backfills. The full match set was checked afterwards to confirm it was one bad row, not a wider pattern.
+3.2 Wrong Granularity: Standings Ranked Tournament Wide Instead of Per Group
+Every team's position in group_standings ran from 1 to 48, not 1 to 4. The cause was reading entry["position"] directly from football-data.org's /standings response, which returns one flat 48 team ranking under a TOTAL type; there is no per-group position anywhere in that payload. The script's own team_group mapping, built separately from match data, was already available but never used to compute position. The fix ranks each group manually after the standings write, ordered by points, then goal difference, then goals for.
+3.3 Duplicate Data
+group_standings had two identical rows for every team. The GroupStanding model used its own auto-incrementing id as primary key, with team_id as a plain foreign key, not the identity SQLAlchemy checks against. session.merge() only updates a row when the primary key matches, so every ingestion run inserted a fresh row instead of updating the existing one. The fix was a schema change, drop id, make team_id the primary key directly, since a team only ever has one current standing. Since this table is fully derived from match results, the safe migration was to drop it and rebuild from a clean re-ingestion rather than attempt to de-duplicate existing rows in place.
+All three issues trace back to the same root cause, trusting the shape of an API response without checking it first. None of them raised an error. Each one produced quietly wrong numbers that looked plausible until queried for the specific case that exposed them.

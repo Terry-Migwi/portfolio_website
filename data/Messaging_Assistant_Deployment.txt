@@ -1,0 +1,56 @@
+﻿Deploying Denta: Docker and Hugging Face Spaces
+This article documents how Denta was containerized with Docker and deployed to Hugging Face Spaces, the decisions behind both choices, and what deploying a system built around OAuth and local file-based credentials to a stateless, ephemeral host actually requires.
+1. Scene
+Denta was built and tested entirely on a local WSL2 machine, with real Google Calendar credentials, real API keys, and a real running FastAPI server on localhost. If this needed to go to production exactly as it stood, several things would immediately be a problem.
+The Google Calendar OAuth flow depends on opening a real browser to click through Google's consent screen, something that only works because a browser happens to be available on that specific machine. The credential files it produces, credentials.json and token.json, sit at specific local file paths the code reads directly. Every API key, Anthropic, Pinecone, HuggingFace, Africa's Talking, lives in a local .env file, loaded automatically by python-dotenv, and that file is deliberately excluded from git, since committing it would leak every secret the project depends on. The Python environment itself, every package, in the specific version it was installed in, exists only because it was set up by hand, once, on this one machine.
+None of that travels automatically. For anyone else to run this project, it would not be a matter of copying the folder from one machine to another. They would need to install every Python package in the exact right version, recreate the credential files at the exact paths the code expects, set every environment variable the .env file was quietly supplying, and separately complete Google's OAuth consent flow themselves, on their own machine, with their own browser, since that consent can't be transferred or copied the way a file can. And even after all of that, the result would only be running on their machine, reachable only by them, with no public URL anyone else could visit.
+Deploying Denta changes that entirely. It means anyone, a recruiter, a reviewer, a real patient, can reach the running system directly through a public URL, in their own browser, with nothing to install, clone, or configure themselves. Denta was deployed on Hugging Face Spaces specifically because it offers a genuinely free hosting tier, suited to a portfolio project with no revenue behind it, and because it deploys directly from a git repository, a normal git push triggers an automatic rebuild and redeploy, no separate deployment pipeline or hosting console to manage.
+Getting there required containerization. Containerization is the practice of packaging an application together with everything it needs to actually run, the exact language runtime, every dependency, the application code itself, into a single self-contained unit that behaves identically no matter what machine it runs on, since it no longer depends on whatever does or doesn't happen to already be installed on the host. Docker is the tool used to build and run that container. Denta's Dockerfile defines, line by line, exactly what has to exist inside that self-contained environment, the Python version, every installed package, the application's own files, and the command that starts the server, so the same environment that ran correctly on a local WSL2 machine runs identically once deployed, without needing anyone, including a future version of the person who built it, to manually recreate that setup by hand ever again.
+2. Approach
+The Dockerfile defines that environment step by step:
+FROM python:3.11-slim
+ 
+RUN useradd -m -u 1000 user
+USER user
+ENV PATH="/home/user/.local/bin:$PATH"
+ 
+WORKDIR /app
+ 
+COPY --chown=user requirements.txt .
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
+ 
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+ 
+COPY --chown=user . .
+ 
+EXPOSE 7860
+ 
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+	
+
+Two decisions here are worth naming individually, since neither is arbitrary. A non-root user, useradd -m -u 1000 user and USER user, means the container runs as an unprivileged user rather than as root, standard container security practice, and specifically required by Hugging Face Spaces, which won't run a container that tries to execute as root. Caching the embedding model at build time, the line that loads SentenceTransformer during the build, downloads and caches that embedding model inside the image itself, rather than leaving it to be fetched over the network the first time the app actually starts. This was a deliberate cold-start decision, calling out to a remote embedding API on every fresh container start would add real, user-visible latency to the very first request after a deploy or restart. Paying that cost once, at build time, instead of on every cold start, was the trade-off made here. Port 7860 in both EXPOSE and the uvicorn command matches Hugging Face Spaces' specific expectation for which port a deployed app listens on.
+The booking flow stopped working on the deployed version
+Once deployed, the booking flow failed on Hugging Face Spaces even though it worked correctly locally. The cause was the Google Calendar integration specifically. Locally, that integration reads two credential files directly off disk, and the first time it runs without an existing token, it opens a real browser to complete Google's consent flow. Neither of those things exists on a deployed Space. There's no local filesystem holding those files beyond what's explicitly built into the image, and there's no browser available inside a headless container to click through a consent screen.
+The fix was changing the credential loading logic to check for the full contents of those credential files provided as environment variables, falling back to reading local files only when running in the local development environment. On the deployment side, that meant supplying the full contents of both credential files as secret values in the Space's settings, rather than as files the app could open.
+This comes with a real, permanent limitation rather than a one-time fix. First-time consent can only ever happen where a real browser exists, which is never true on the deployed Space itself. If the underlying credential eventually needs to be re-authorized, that step has to happen locally again, on a developer's machine, through the browser flow, with the result then manually copied into the Space's settings. There's no way to complete that step from inside the deployed environment.
+Avoiding a crash from a feature this deployment doesn't use
+This deployment only serves the browser-based chat feature, not the SMS/WhatsApp messaging feature, since the messaging platform's sandbox restrictions make it impractical to demo that way. But the code that handles sending text messages was set up to initialize itself the moment the application started, regardless of whether anything actually needed to send a message yet. On this deployment, the credentials that feature needs were never provided, since they're not relevant to a chat-only demo, and that initialization step failed immediately on startup, crashing the entire application before it ever got the chance to serve a single request, even though nothing about the chat feature itself depended on it.
+The fix was changing that initialization to happen only at the moment a message actually needs to be sent, rather than the moment the application starts. That way, a deployment that never sends a message never triggers that initialization at all, and the missing credentials stop being a problem, since the code path that would need them is simply never reached.
+Keeping secrets and junk out of the image
+A separate ignore file controls what gets copied into the Docker build itself, independent of what's tracked in git:
+.env
+__pycache__
+*.pyc
+.git
+credentials.json
+token.json
+*.db
+test_*.py
+locustfile.py
+	This matters for two different reasons at once. The .env file and the credential files must never end up baked into a public image, since that would ship real secrets to anyone who pulls the image. Excluding database files matters for a subtler reason, without it, local files containing real test data and phone numbers from development would be copied straight into the deployed container. Test scripts and the load-testing file are excluded for a different reason entirely, not security, just keeping the runtime image lean, they have no reason to exist inside a container that only needs to serve requests.
+3. Results
+The deployed Space now runs the same booking, FAQ, and anomaly detection logic verified locally throughout this series, reachable at a public URL rather than only on localhost. 
+Here is the link to the app on HuggingFace Spaces. [Click Here to try out Denta]
+4. Key Takeaway
+Deployment is about making a system that works on one machine work identically for anyone, anywhere, with no setup on their end. We used Hugging Face Spaces because it offers a genuinely free hosting tier suited to a portfolio project with no revenue behind it, and because it deploys directly from a git repository, a normal push triggers an automatic rebuild with no separate deployment pipeline to manage.
+What this solved, generally, is the gap between "this runs on my machine" and "this runs." Containerizing Denta meant the exact environment it depended on, every package, every version, travelled with it rather than needing to be recreated by hand somewhere else. Deploying it meant that environment now runs on infrastructure available to anyone, at a public address, with nothing to install. Getting there required solving problems that only exist once code leaves the machine it was built on, credentials with nowhere to live, a browser that no longer exists, a feature initializing itself before anything actually needed it. None of those were application logic problems. They were environment problems, and solving them is its own distinct piece of engineering work, separate from building the system in the first place.

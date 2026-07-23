@@ -1,0 +1,68 @@
+﻿Session Management: How Denta Remembers a Conversation Across Messages
+This article covers the SessionManager class that gives Denta's Messaging assistant memory across turns, and the design flaw in it that let the hallucination bug in the previous article happen.
+1. Scene
+Session management is the practice of holding a user's state, in this case a conversation history, across multiple separate requests, so a system can respond as though it remembers what was already said rather than treating each message as the first one. For a messaging assistant, this matters because a text conversation is rarely a single exchange. A patient messaging Denta rarely says everything in one message. A booking takes several turns, a service, then a date, then a time, then a confirmation. A FAQ conversation can reference something asked two messages earlier. Without something holding that thread together, every reply would have to stand on its own, disconnected from everything the patient had already said.
+2. Problem
+Every message that reaches Denta arrives as an independent HTTP request. FastAPI has no built-in memory of a previous request once it has finished responding to it. This is a limitation of chatbots in general, not specific to this assistant or this framework. Without session management, a chatbot cannot hold a conversation flow at all, it can only answer isolated messages, one at a time, each treated as though nothing came before it. For example, in a booking conversation, it is typical of the assistant to ask the user to confirm the patient’s details before making the booking. If the user confirms by saying "Yes confirm" then it is meaningless without knowing what it is confirming, and nothing in that message alone carries that context.
+The assistant needs somewhere to keep each patient's conversation history, keyed to that patient specifically, so a new incoming message could be answered in light of what has already been said. It also needed that memory to eventually let go, since a conversation abandoned mid-booking should not stay live forever, holding onto stale context indefinitely.
+3. Approach
+The core design
+I set Denta's session TTL, time to live, to thirty minutes. TTL is the length of time a piece of stored data is allowed to stay valid before it expires and gets treated as gone. Thirty minutes means a patient who steps away mid-booking and returns an hour later has the assistant start fresh rather than assume the conversation is still where they left it.
+I built SessionManager, a class holding one conversation history per phone number, in a plain dictionary in memory. Each entry stores a ChatMessageHistory object and a last_active timestamp.
+ChatMessageHistory is LangChain's object that keeps a list of messages exchanged so far, in order, so a chain can be handed the whole conversation instead of just the latest message on its own.
+RunnableWithMessageHistory is a LangChain wrapper that sits around a chain and connects it to memory automatically. A wrapper, in this context, is a piece of code that sits around another piece of code and handles something automatically that would otherwise have to be done by hand on every call. On every call, RunnableWithMessageHistory  looks up the right history using a session ID, hands the chain the full conversation so far, and appends the new exchange back into that history once the chain responds. Without it, wiring memory into a chain manually would mean fetching, injecting, and saving the history by hand on every single call.
+class SessionManager:
+    def __init__(self, ttl_seconds: int = 1800):
+        self.ttl_seconds = ttl_seconds
+        self._sessions: dict = {}
+ 
+    def get_session_history(self, session_id: str) -> ChatMessageHistory:
+        now = time.time()
+ 
+        if session_id in self._sessions:
+            session = self._sessions[session_id]
+            age = now - session["last_active"]
+ 
+            if age > self.ttl_seconds:
+                self._sessions.pop(session_id)
+            else:
+                self._sessions[session_id]["last_active"] = now
+                return self._sessions[session_id]["history"]
+ 
+        self._sessions[session_id] = {
+            "history": ChatMessageHistory(),
+            "last_active": now,
+        }
+        return self._sessions[session_id]["history"]
+	
+
+get_session_history is the method RunnableWithMessageHistory calls on every chain invocation, so it is the point where the TTL logic actually takes effect. A session younger than ttl_seconds returns its existing history and the conversation continues. A session older than that gets dropped and replaced with a blank one, silently, on the next message, so an abandoned conversation eventually resets itself without needing any separate cleanup process running in the background.
+Utility methods
+Alongside the core lookup, I added a few methods for visibility and control rather than for the chains themselves to call. list_active_sessions returns a summary of every non-expired session, useful for checking what the system is actually holding in memory at any point. clear_session removes a session manually, and session_count reports how many entries exist, including ones that have technically expired but have not yet been touched again.
+clear_session turned out to matter more for debugging. Once a booking is confirmed, there is no reason for the assistant to keep treating the next message from that patient as part of the same booking conversation, so I call it explicitly right after a confirmed booking triggers its background side effects, closing the loop on that conversation rather than letting it idle out on the TTL alone.
+def clear_session(self, session_id: str) -> bool:
+    if session_id in self._sessions:
+        self._sessions.pop(session_id)
+        logger.info(f"Session manually cleared for {session_id}")
+        return True
+    return False
+	The design flaw
+The original SessionManager was built as one shared instance, used by every chain in the system, FAQ, booking, and general, all reading from and writing to the same dictionary keyed only by phone number. At the time, this looked like the simpler and more natural design. One patient, one phone number, one conversation history, regardless of which part of the assistant happened to be answering at a given moment.
+That design carried a risk I did not see until it produced a real failure. If a message was ever misrouted to the wrong chain, that chain would inherit whatever conversation history already existed for that phone number, including context from a completely different kind of exchange. I have an article on how the messaging assistant hallucinated a booking by misclassifying a confirming message reaching the FAQ chain, which has no tools and cannot check a calendar, but which read a shared history where a name, a date, and a time had already been gathered by the booking agent, and answered by writing a fully detailed, entirely fabricated booking confirmation.
+The fix was to stop sharing the state. I gave booking its own dedicated SessionManager instance, separate from the one for FAQ and general use, and added a method to check whether a booking conversation is already active for a given phone number.
+def has_active_session(self, session_id: str) -> bool:
+    if session_id not in self._sessions:
+        return False
+    session = self._sessions[session_id]
+    age = time.time() - session["last_active"]
+    if age > self.ttl_seconds:
+        return False
+    return len(session["history"].messages) > 0
+	
+
+With a dedicated instance and this check in place, once a booking conversation starts, every reply in that session routes straight back to the booking agent, without ever touching the classifier or the shared FAQ history again. A misroute can still happen at the classification step, but it can no longer reach a chain that has no business seeing that conversation's context.
+4. Results
+With the split in place, a booking conversation and an FAQ conversation for the same phone number no longer share any state. Testing the same misclassification scenario that had previously produced a fabricated confirmation, a short, context-free confirming message, no longer reaches the FAQ chain once a booking is active, because the sticky routing check intercepts it before classification ever runs.
+list_active_sessions and session_count proved useful beyond debugging this specific issue, giving a quick way to check what the system is holding at any point without needing to inspect the dictionary directly, which mattered while testing the fix, confirming that a cleared booking session genuinely disappeared from the active list rather than lingering under a different code path.
+5. Key Takeaway
+Session memory is what makes a multi-turn conversation possible at all, and it is also exactly the kind of state that becomes dangerous the moment it is shared more broadly than it needs to be. The original design shared one memory store across every chain because that seemed like the natural way to represent "one patient, one conversation." It took a real failure to show that the correct scope for shared state is not the patient. It is the specific conversation a given chain is actually equipped to have. A chain with no tools should never be able to inherit the context of one that has them.

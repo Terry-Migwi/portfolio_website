@@ -1,0 +1,166 @@
+﻿TournamentIQ — The Intelligence Layer
+TournamentIQ is an intelligent system that tracks team strength using live 2026 FIFA World Cup data. This article discusses how I built an intelligence layer to provide qualitative data.
+1. The gap structured data cannot fill
+The Poisson model produces a win probability from goals scored, goals conceded, and Elo ratings. It does that well. But a probability built from those numbers alone tells you nothing about whether the favourite's first-choice striker is suspended, whether these two teams have a history of low-scoring draws regardless of what the form table suggests, or whether one side is playing with nothing to lose after already qualifying.
+Those things matter. The intelligence layer does not change the probability. It sits alongside it, adding the qualitative context that numbers alone cannot provide. The brief and the probability are two independent outputs. One tells you the number. The other tells you what to make of it.
+2. What the agent pulls
+Before each match, the system runs a ReAct agent. ReAct is a reasoning pattern built on three steps that repeat in a loop until the agent has enough to produce a brief:
+
+
+* Reason — the agent looks at what it knows and decides what it still needs. For a pre-match brief, sources for injury news, head-to-head history, tactical context and reasons about what is useful for a specific fixture.
+* Act — the agent calls a tool to get what it needs. In this system, that tool is Tavily search. The agent constructs a search query based on its reasoning and fires it.
+* Observe — the agent reads the result and decides whether it has enough to move forward or whether it needs to search again. If a search returns thin results, it reformulates and tries again.
+
+
+It is the same loop a human analyst runs before writing a match preview, just automated.
+
+
+The agent pulls four things for every fixture:
+
+
+Live form strings from the football-data.org API. The brief reflects results from this week, not last month. Form is fetched fresh at brief generation time rather than read from the database, so it never goes stale between ingestion runs.
+Elo ratings from the local database. These measure how dominant each team has been in this specific tournament, not across years of international football. A team that beat two weak opponents and a team that beat two strong opponents can have identical league table positions. The Elo ratings separate them.
+Injury and suspension news via web search. A missing key player or a suspended goalkeeper is the context the brief should surface. This information does not feed into the probability calculation. It sits in the qualitative brief as context for anyone reading the output.
+Head-to-head history and tactical context, also via web search. Two teams can have equal Elo ratings and completely different ways of breaking each other down. Head-to-head record and tactical patterns give the brief a layer of context the numbers alone cannot provide.
+3. Why an agent and not a scraper
+A scraper requires you to know in advance exactly what to look for and where to find it. Before the Argentina vs Jordan fixture, you need to have already decided which sites to scrape, which fields to extract, and what to do when the structure changes. That is substantial manual work before a single fixture runs, and it has to be repeated every time a source changes its layout.
+The agent, on the other hand, decides what it needs as it goes. The ReAct loop handles the discovery step automatically. A scraper is a fixed pipeline, while the agent is a flexible one.
+Tavily is the search tool powering the web search steps. It is the native search integration in the LangChain ecosystem and returns structured results that the agent can read and reason over without additional parsing. I did not evaluate alternatives. For a system running pre-match searches on a tournament schedule, Tavily's result quality and LangChain compatibility made it the straightforward choice.
+4. How the code is structured
+The intelligence layer lives in two functions: generate_brief() and parse_brief().
+generate_brief() does the work. It fetches live form and Elo ratings, builds the prompt with all available context, creates the ReAct agent, and invokes it. The agent runs its search loop, reasons over what it finds, and returns a raw response. generate_brief() then calls parse_brief() and attaches the Poisson probabilities before returning the finished brief.
+parse_brief() does one thing. It takes whatever the agent returned and forces it into the MatchBrief schema. The agent is instructed to return JSON, but raw LLM output is unpredictable. parse_brief() strips markdown fences if they appear, parses the JSON, and validates every field against the Pydantic model. If the output does not match the schema, it fails loudly rather than passing a malformed brief downstream.
+The two functions are kept separate deliberately. generate_brief() can change the prompt, the model, or the tools without touching the parsing logic. parse_brief() can tighten the schema or add validation without touching the generation logic. Each function owns one responsibility.
+Why Pydantic for the schema
+The MatchBrief model defines every field the brief must contain: home and away team names, form strings, key absences, head-to-head record, tactical notes, Elo ratings, data confidence, source URLs, and Poisson probabilities. Pydantic validates the agent's output against this schema the moment parse_brief() runs. A missing field or a wrong type raises an error immediately, before the brief reaches the narrative layer or any downstream system. Without schema validation, a malformed brief would pass silently until something downstream broke.
+Why use a function parse_brief() and not structured output prompting
+Structured output prompting is a technique where you instruct the LLM to return its response in a specific format, typically JSON matching a defined schema, enforced at the model call level rather than handled in code afterwards. LangChain provides with_structured_output() for exactly this.
+I considered it because it would have removed the need for parse_brief() entirely, with the schema enforced before the response ever reaches application code.
+However, I ended up not using it because langchains with_structured_output() disables tool use on the model it is attached to. An agent that cannot call tools cannot run searches. Since the web searches are the entire reason for using an agent in the first place, attaching with_structured_output() would have removed the system's core capability to gain schema enforcement. That trade-off does not make sense. parse_brief() handles schema enforcement instead, keeping tool use intact.
+Below is a snippet of the full script
+
+
+llm = ChatAnthropic(model='claude-haiku-4-5', api_key=ANTHROPIC_API_KEY)
+search_tool = TavilySearch(max_results=3)
+tools = [search_tool]
+
+
+def generate_brief(home_team, away_team, home_id, away_id) -> MatchBrief:
+    home_form = get_fresh_form(home_id)
+    away_form = get_fresh_form(away_id)
+    elo_home = get_elo(home_id)
+    elo_away = get_elo(away_id)
+
+
+    agent = create_agent(llm, tools)
+
+
+    prompt = f'''
+    You are a football intelligence analyst. Produce a pre-match brief for this fixture.
+    Home team: {home_team} (form: {home_form}, Elo: {elo_home})
+    Away team: {away_team} (form: {away_form}, Elo: {elo_away})
+    Use the search tool to find:
+    - Key injuries or suspensions for either team
+    - Head-to-head history
+    - Tactical context
+    Return a JSON object with exactly these fields:
+    home_team, away_team, form_last_5, key_absences,
+    h2h_record, tactical_notes, elo_home, elo_away,
+    data_confidence, sources
+    Return only the JSON object. No explanation, no markdown fences.
+    '''
+
+
+    result = agent.invoke({'messages': [{'role': 'user', 'content': prompt}]})
+    raw = result['messages'][-1].content
+    brief = parse_brief(raw)
+    brief.probabilities = predict(home_id, away_id)
+    return brief
+
+
+def parse_brief(raw: str) -> MatchBrief:
+    if '```json' in raw:
+        clean = raw.split('```json')[1].split('```')[0].strip()
+    elif '```' in raw:
+        clean = raw.split('```')[1].split('```')[0].strip()
+    else:
+        clean = raw.strip()
+    data = json.loads(clean)
+    return MatchBrief(**data)
+5. The data flow
+The pipeline runs in this order for every fixture:
+
+
+football-data.org API
+Live form strings fetched at brief generation time
+	↓
+	worldcup_2026.db
+Elo ratings read from the local database
+	↓
+	Prompt assembled
+Form, Elo, and fixture context combined
+	↓
+	ReAct agent invoked
+Reason → Act → Observe loop begins
+	↓
+	Tavily search
+Injuries, head-to-head, tactical context
+	↓
+	Raw JSON response
+Agent returns output after the loop completes
+	↓
+	parse_brief()
+Strips fences, parses JSON, validates MatchBrief schema
+	↓
+	Poisson probabilities attached
+Independent calculation, not influenced by agent output
+	↓
+	Finished MatchBrief
+Structured brief ready for downstream use
+	↓
+	Narrative layer
+Separate LLM call — 2-sentence plain English summary
+	↓
+	Output
+Brief + probability + narrative delivered
+	
+
+The Poisson probabilities attach to the brief at the generate_brief() level but are calculated independently. The agent output does not influence them.
+6. The narrative layer
+The narrative layer is a separate LLM call that reads the finished brief and answers one question: what is the single most important thing to know about this match going in? The agent gathers intelligence while the narrative layer creates the summary with a maximum of two sentences. The first statement identifying the risk factor, and the second statement explains why it matters.
+The brief contains the data. The narrative layer surfaces what a reader should actually pay attention to. For a match where both teams have similar Elo ratings and form, the narrative might surface a suspended key player. For a match with a heavy favourite, it might flag the one condition under which a different result becomes plausible.
+7. Honest trade-offs
+Credibility of data sources
+The system cannot fully separate facts from media speculation. Tavily returns what it finds on the web, and not everything on the web is accurate. A rumoured injury reported by one outlet looks the same to the agent as a confirmed suspension reported by the club. To surface this uncertainty, every brief carries a data_confidence field set by the agent: high, medium, or low. The agent is instructed to set this based on the quality and consistency of what it found, not on what it wanted to find.
+Every brief also stores the exact source URLs it was built from in the sources field. Anyone relying on a brief can trace every claim back to its origin and verify it directly. The confidence score flags the uncertainty. The source list makes verification possible. Neither fully solves the credibility problem, but together they make it visible.
+Latency
+The ReAct loop takes time. Each search call adds a round trip, and the agent may run several before it has enough to produce a brief. For a pre-match brief generated hours before kickoff, this latency is not a problem. For a system that needs to react in near real time, the agent's search loop would need to be bounded more tightly or replaced with cached data for the highest-volume use cases. In the current architecture, pre-match briefs are generated once per fixture and stored, so the latency cost is paid once and not repeated.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The diagram below is a visual of the ReAct loop

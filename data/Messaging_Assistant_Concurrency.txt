@@ -1,0 +1,64 @@
+﻿Concurrency: Making /chat Handle Multiple Patients at Once
+This article documents how we accounted for concurrency in Denta's /chat endpoint, and how we tested it using a Locust load test.
+1. Scene
+Picture a normal moment on Denta. One patient is asking what a root canal costs. At the same time, a second patient is halfway through booking an appointment, they've already given their name and preferred date and are waiting to hear back about available slots. A third patient just opened the chat and is asking a general question about gum sensitivity. A fourth is mid-booking too, but earlier in the flow than the second patient, still being asked for their preferred time. None of these four is waiting for the others. All four are real, independent conversations, and all four are happening on the same server at roughly the same moment.
+Concurrency is a server's ability to make progress on multiple requests during overlapping periods of time, rather than finishing one request completely before starting the next. It doesn't necessarily mean two things compute at the exact same instant, it means a server can be usefully occupied with more than one request's work during the same stretch of time, rather than one request holding the entire server hostage until it's fully done.
+For a web server handling many users, most of a single request's time isn't spent computing anything at all, it's spent waiting. Waiting for a network call to an external API to return. Waiting for a database write to finish. In Denta specifically, that waiting shows up as time spent waiting on Claude to classify an intent, waiting on Claude to generate a RAG answer, waiting on the booking agent's tool calls to reach Google Calendar and get a response back, and waiting on the anomaly checks to return their classification. Concurrency exists to use that waiting time productively, letting the server pick up the third and fourth patients' requests while the first and second are stuck waiting on Claude or Google Calendar to respond, instead of sitting idle until those waits are over.
+2. Problem
+Not accounting for concurrency means that when multiple patients are using Denta at the same time, only one of them can actually be helped at a time, and everyone else's messages sit completely frozen, not slowly processed, frozen, until that one patient's request finishes entirely. The patient asking about root canal pricing wouldn't get an answer until the patient's mid-booking finished every step of theirs first, even though the two conversations have nothing to do with each other. A server that isn't built to account for concurrency effectively serves one patient and makes everyone else wait in a line they can't see, no matter how many patients are actually trying to use the assistant at once.
+3. Approach
+Denta's /chat endpoint is built to run with multiple patients at the same time. Every blocking call inside /chat, intent classification, the booking handler, the FAQ handler, the general handler, and the anomaly checks, is handed off through asyncio.to_thread, which runs a function on a separate thread and lets the main process stay free to pick up other patients' requests while that thread works.
+intent = await asyncio.to_thread(classify_intent, request.message)
+ 
+if intent == "booking":
+    answer, confirmed, transcript = await asyncio.to_thread(
+        _handle_booking, request.message, session_id
+    )
+elif intent == "general":
+    answer = await asyncio.to_thread(_handle_general, request.message)
+else:
+    answer = await asyncio.to_thread(_handle_faq, request.message, session_id)
+ 
+flagged = await asyncio.to_thread(check_for_anomaly, session_id, answer, tool_confirmed)
+	
+
+Each of these four handlers needed await and asyncio.to_thread for the same underlying reason, each one is a synchronous function making a real network call, to Claude, to Google Calendar, to the vector store, and none of them was written with async/awaits internally. Without wrapping them, calling any one of them directly inside /chat would hold the entire server hostage for the full duration of that call, exactly the scenario described in the Problem section. classify_intent needs it because every single message passes through it first, so a block there stalls every patient regardless of what they're asking. _handle_booking needs it because it's the heaviest call, a LangGraph agent that can make several tool calls in sequence, each one a real wait. _handle_faq needs it because the RAG chain itself involves a real network call to Claude on top of the retrieval step. _handle_general needs it for the same reason, a direct model call with real latency. The anomaly check needs it because it runs on every single reply, regardless of which handler produced it, so leaving it blocking would reintroduce the exact problem the other three fixes were meant to solve, just at the very last step instead of the first.
+
+
+4. Testing
+I used Locust to test for concurrency because a fix that looks correct in code can still behave wrong under real load, and the only way to know for certain is to actually generate that load and measure what happens. Locust is a load testing tool that simulates multiple users hitting an endpoint at the same time, letting you specify how many simulated users, how fast they ramp up, and what each one actually does, then reports back real response times, failure rates, and throughput.
+I tested locally against localhost, not the deployed Hugging Face Spaces link, since that free tier runs on shared infrastructure with no guarantee of real concurrency headroom, and load testing a public host risks producing numbers that reflect HF's infrastructure rather than the actual code. I did two independent tests, on the FAQ flow and the booking flow, as shown below:
+FAQ flow. Ten simulated users, each asking FAQ questions concurrently, ramped in over a few seconds. This test was cheap to run repeatedly, no calendar writes, no real cost beyond the classification and RAG calls themselves, and it isolates the concurrency question cleanly from booking's extra complexity.
+Booking flow. Five simulated patients, each booking a distinct time slot on the same day, run once rather than repeated, since a genuine booking flow involves a real calendar write and shouldn't be run more than needed. This test's harness had its own bug, a shared counter read by multiple simulated users at the same instant produced duplicate session IDs, causing two simulated patients to collide on one session. I chose not to chase that fix further, since it surfaced a real thread-safety gap in SessionManager worth documenting rather than solving on the spot.
+5. Results
+Below is a screenshot showing the FAQ flow test completed 123 total requests against ten concurrent users, with zero failures.
+  
+
+
+
+Metric
+	Value
+	Total requests
+	123
+	Failures
+	0
+	Median response time
+	6,400 ms
+	Average response time
+	7,000 ms
+	Min response time
+	4,818 ms
+	Max response time
+	19,260 ms
+	95th percentile
+	12,000 ms
+	Average throughput
+	1.08 requests/second
+	
+
+Zero failures across the full run is the first result worth noting on its own, ten users hammering /chat concurrently produced no crashes, no timeouts, nothing dropped.
+The stronger evidence sits in the throughput number. At an average of 1.08 requests per second sustained across the whole test, 123 requests completed in roughly 114 seconds. If those same 123 requests had run one at a time, the old broken behaviour, at an average of 7 seconds each, they would have taken roughly 861 seconds, over 14 minutes, to fully clear. The test actually finished in about 13% of that time. That gap, nearly 15 minutes of fully serialised work landing in under two minutes, is the direct signature of requests genuinely overlapping rather than queuing behind each other, which is exactly what the asyncio.to_thread fix was meant to produce.
+The booking-flow test did not produce a clean result. Instead of proving concurrency under a heavier load, it surfaced a second, real issue: SessionManager's dictionary was never written with concurrent access in mind, and two real threads hitting the same session at once is a legitimate race condition. That gap remains open. In practice, it would only trigger if the same phone number sent two messages in the same instant, which is rare but not impossible, and worth documenting as a known limitation rather than a fix already made.
+6. Conclusion
+Concurrency matters for Denta specifically because patients messaging the clinic don't coordinate with each other, they arrive whenever they arrive, and a booking conversation can sit mid-flow for as long as a patient takes to reply, while completely unrelated FAQ questions keep coming in from other people at the same time. A server that can only make progress on one of these at a time turns every busy moment into a queue; every other patient is invisibly stuck behind, regardless of how simple their own question actually was.
+async and await are Python's way of marking where a function can pause and hand control back to the server instead of holding it hostage while waiting on something external, a reply from Claude, a write to Google Calendar. async def on its own is only a label; it doesn't make anything inside a function non-blocking automatically, every call inside still has to genuinely support pausing, either by being written as async itself or by being handed off to its own thread with asyncio.to_thread. The FAQ test is the proof that mattered here, 123 requests completing in a fraction of the time they'd take running one after another, real evidence that patients on Denta can now be helped at the same time, instead of standing in a line none of them can see.

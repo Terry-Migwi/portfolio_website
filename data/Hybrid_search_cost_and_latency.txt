@@ -1,0 +1,130 @@
+﻿Cost and Latency: What The Search Pipeline Actually Costs to Run
+This article documents the real cost of running the semantic search pipeline for 10 users, breaking down spend per API call, per day, and per month, and combining that with the latency numbers from the Locust load test to give a complete picture of what the pipeline costs in both money and time.
+1. Scene
+Every external API call in a production system has a cost attached to it, and those costs compound with usage in ways that are not always obvious from looking at a single request. Understanding the cost model of a pipeline means being able to make informed decisions about architecture, user limits, and pricing if the product is ever monetised.
+Cost visibility matters for three reasons:
+
+
+* It determines whether the pipeline is financially viable at the scale it is intended to serve.
+* It identifies which components drive the majority of the spend, pointing toward the right optimisation targets if costs need to be reduced.
+* It gives the developer confidence when talking to potential clients or employers about the economics of the system they built.
+
+
+This article breaks down the cost of running this pipeline for 10 users across three usage scenarios, using real token counts measured from live API calls and current published pricing for every external service.
+2. Components
+The pipeline makes external calls to three services on every request. Each has a different cost model.
+HuggingFace embeddings
+The embedding model used in this pipeline is all-MiniLM-L6-v2, downloaded from HuggingFace and run locally using sentence-transformers. It runs on CPU inside the application process. There is no API call and no per-query charge. The cost is compute time on whatever hardware the application is running on. For a Hugging Face Spaces deployment, this means CPU time on their infrastructure, which is included in the Space's runtime allocation.
+Pinecone serverless
+Pinecone serverless charges per read unit for queries and per write unit for upserts, plus storage at $0.33 per GB per month. This pipeline stores 70 vectors at 384 dimensions. At that size the index fits comfortably within Pinecone's free tier, which includes 2GB of storage and 1 million read units per month. At 10 users making moderate usage, the monthly read unit consumption stays well within the free allowance. Pinecone cost for this project at this scale is effectively zero.
+Claude Haiku 4.5
+Claude Haiku 4.5 is the only service that generates meaningful cost at this scale. It is called twice per /rag request and once per /search request. The two calls are:
+The guardrail call, which classifies every incoming query as in scope or out of scope before the pipeline runs. This is a forced tool call with a structured boolean output. It runs on every request regardless of endpoint.
+The generation call, which receives the retrieved proposal context and produces a synthesised answer. This only runs on /rag requests.
+Claude Haiku 4.5 is priced at $1.00 per million input tokens and $5.00 per million output tokens.
+3. Calculations
+Measured token usage
+Token counts were measured from live API calls against the deployed pipeline. The guardrail receives the query text, a system prompt defining the scope, and a tool schema. The generation call receives the query, a system prompt, and up to 1,500 characters of full text from each of the three retrieved proposals.
+
+
+Call
+	Input tokens
+	Output tokens
+	Total tokens
+	Guardrail
+	712
+	79
+	791
+	RAG generation
+	1,423
+	181
+	1,604
+	
+
+Cost per call
+
+
+Call
+	Input cost
+	Output cost
+	Total cost
+	Guardrail
+	$0.000712
+	$0.000395
+	$0.001107
+	RAG generation
+	$0.001423
+	$0.000905
+	$0.002328
+	
+
+Cost per endpoint
+Every /search request makes one guardrail call. Every /rag request makes one guardrail call and one generation call.
+
+
+Endpoint
+	Cost per request
+	/search
+	$0.001107
+	/rag
+	$0.003435
+	
+
+Cost at 10 users
+Three usage scenarios are modelled, using a mix of 70 percent /search requests and 30 percent /rag requests, which reflects realistic behaviour where most users browse results before asking for a synthesised answer.
+
+
+Scenario
+	Queries per user per day
+	Total queries per day (10 users)
+	Cost per day
+	Cost per month
+	Light
+	5
+	50
+	$0.091
+	$2.73
+	Moderate
+	20
+	200
+	$0.361
+	$10.83
+	Heavy
+	50
+	500
+	$0.903
+	$27.09
+	
+
+At moderate usage, 10 users generate approximately $11 per month in API spend. At heavy usage the cost stays under $30 per month. These are low numbers for a production AI pipeline with retrieval, re-ranking, guardrails, and generation all running on every request.
+The guardrail contributes meaningfully to the total cost. At moderate usage it accounts for approximately 32 percent of the total Claude spend across both endpoints, since it runs on every request including /search requests that never reach the generation step. At $0.001107 per call, the guardrail costs roughly $0.11 per 100 requests. This is a real but justified cost: it prevents irrelevant queries from reaching the more expensive generation step, and at scale it saves more than it costs by blocking out-of-scope traffic before those calls incur generation charges.
+4. Latency
+Cost in money is only part of the picture. Cost in time, how long a user waits for a response, is equally important for a deployed API.
+A Locust load test measured latency under 10 concurrent users across 45 requests, with a ramp-up of 2 users per second and a mix of /search and /rag requests drawn from a pool of realistic queries. The results reflect the cumulative cost of running the full pipeline under concurrent load.
+
+
+Endpoint
+	p50 latency
+	p95 latency
+	Min
+	Max
+	/search
+	14,000ms
+	25,000ms
+	2,082ms
+	27,656ms
+	/rag
+	24,000ms
+	33,000ms
+	15,334ms
+	32,549ms
+	
+
+The p50 latency on /search is 14 seconds and on /rag is 24 seconds. These numbers are high for a web application and worth explaining honestly.
+The /search pipeline runs five sequential steps: guardrail classification, query encoding, Pinecone hybrid retrieval, deduplication, and cross-encoder re-ranking. Each step involves either a network round trip or a CPU-bound model inference. Under concurrent load, multiple requests compete for the same CPU resources for the embedding and re-ranking steps, adding queue time on top of the per-step latency.
+The /rag pipeline runs all five steps from /search plus a Claude generation call that produces up to 400 output tokens. Claude Haiku is fast, but token generation still adds 3 to 10 seconds depending on output length and API load.
+The p95 spread is wide on both endpoints. /search goes from 14 seconds at p50 to 25 seconds at p95, an 11-second gap. /rag goes from 24 seconds at p50 to 33 seconds at p95, a 9-second gap. This spread reflects the variability of external API response times under concurrent load combined with CPU contention on the re-ranking step.
+The minimum latency on /search is 2,082ms, just over 2 seconds. This is the floor when no contention exists: a fast guardrail call, a warm embedding model, a responsive Pinecone index, and a fast cross-encoder pass. Under light load with a single user, the pipeline consistently approaches this floor.
+5. Key Takeaway
+This pipeline costs approximately $3 to $27 per month to run for 10 users depending on usage intensity, driven almost entirely by Claude Haiku API calls. HuggingFace embeddings run locally at no incremental cost. Pinecone storage and queries fit within the free tier at this scale. The guardrail adds approximately $0.001 per request but saves money at scale by blocking out-of-scope queries before they reach the more expensive generation step.
+Latency is the more significant operational concern at this scale. The p50 latency of 14 seconds on /search and 24 seconds on /rag reflects a pipeline with five to six sequential steps, each with its own latency floor. These numbers are acceptable for a research or review tool where users are reading detailed proposal content, and would need addressing before the pipeline could serve as a real-time consumer product. The primary levers for reducing latency are caching embeddings for repeated queries, running re-ranking in parallel with full-text loading, and considering a faster re-ranking model for lower-latency deployments.

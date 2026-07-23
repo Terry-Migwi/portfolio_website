@@ -1,0 +1,67 @@
+﻿RAG Evaluation: Measuring What the Search Pipeline Actually Gets Right
+This article documents how I evaluated the semantic search pipeline against a structured dataset of 12 questions using two metrics, accuracy and faithfulness, and what the results reveal about where the pipeline performs well and where it does not.
+1. Scene
+Building a RAG pipeline and observing that it returns plausible answers is not the same as knowing whether those answers are correct. A language model is fluent by design. It produces confident, well-structured responses whether or not those responses are grounded in the retrieved content. Without a structured evaluation, there is no way to distinguish a pipeline that works from one that merely sounds like it works.
+Evaluating a RAG pipeline means running it against a set of questions with known expected answers, scoring the responses against those answers, and producing numbers that reflect the pipeline's actual behaviour rather than its apparent behaviour.
+I built a twelve-question evaluation dataset covering three query types that reflect realistic usage of this proposal search engine: factual lookups with specific verifiable answers, cross-document synthesis questions that require information from multiple proposals, and conceptual questions about themes across the corpus. I scored each response on two metrics: accuracy against a ground truth answer, and faithfulness to the retrieved context.
+2. Problem
+Two distinct things can go wrong in a RAG pipeline and they require different metrics to detect.
+The first is giving the wrong answer, which is known as hallucination. The pipeline retrieves context and Claude produces a response that does not accurately reflect what is in the corpus. Hallucination in a RAG system is not always a fabricated fact. It can also be an accurate-sounding answer that simply does not match the specific content in the retrieved documents, because the retrieval surfaced the wrong documents, or because the relevant information was not in the top results returned. A hallucinated answer looks identical to a correct one in the absence of a ground truth to compare against.
+The second is an ungrounded answer. Claude produces a response that is factually plausible but not supported by the retrieved context. In a RAG system, the model is supposed to answer from what was retrieved, not from what it already knows. An ungrounded answer undermines the entire purpose of retrieval, because the system is effectively bypassing its own knowledge base and answering from training data instead.
+Accuracy alone does not catch the second problem. A model with strong domain knowledge might produce accurate answers on a corpus it was never trained on by drawing on that knowledge rather than the retrieved context. Those answers would score well on accuracy but poorly on faithfulness, revealing that the retrieval step is not doing the work it is supposed to do.
+Both metrics together give a complete picture: accuracy tells you whether the answer is right, and faithfulness tells you whether it is right for the right reason.
+3. Approach
+Evaluation dataset
+The dataset contains twelve questions across three types. Factual questions have a specific, verifiable answer contained in one document. Synthesis questions require combining information from two or more proposals. Conceptual questions ask about themes or patterns across the full corpus with no single correct answer.
+Four questions per type gives enough coverage to identify patterns by type without making the evaluation prohibitively expensive to run. Each question has a ground truth answer written directly from the proposal documents, used as the reference for accuracy scoring.
+Accuracy metric
+Accuracy is measured by a custom Claude-as-judge evaluator. For each question, the evaluator receives the question, the ground truth answer, and the system's actual answer, then returns a score from 0.0 to 1.0 with a one-sentence explanation. The scoring rubric is:
+
+
+* 1.0: Completely accurate, covers all key facts from the ground truth
+* 0.7: Mostly accurate, covers the main points with minor omissions
+* 0.5: Partially accurate, covers some key facts but misses important ones
+* 0.3: Mostly inaccurate or significantly incomplete
+* 0.0: Completely wrong or irrelevant
+
+
+Using Claude as the judge rather than exact string matching is appropriate for this corpus because the answers are open-ended prose. An answer that correctly states all the facts but uses different phrasing than the ground truth should score well, and a judge model can make that assessment where string matching cannot.
+Faithfulness metric
+Faithfulness is measured by a second Claude-as-judge call that receives the retrieved context chunks and the system answer, then scores how well the answer is supported by those specific chunks. A score of 1.0 means every claim in the answer is directly supported by the retrieved context. A score of 0.0 means the answer contradicts or ignores the context entirely.
+This metric is independent of accuracy. An answer can be accurate but unfaithful, meaning Claude produced the right answer by drawing on its own knowledge rather than the retrieved chunks. It can also be faithful but inaccurate, meaning Claude stayed within the retrieved context but that context did not contain the correct information.
+4. Results
+Summary scores
+
+
+Type
+	Questions
+	Accuracy
+	Faithfulness
+	Factual
+	4
+	0.85
+	0.525
+	Synthesis
+	4
+	0.20
+	0.325
+	Conceptual
+	4
+	0.225
+	0.200
+	
+
+Factual queries perform well
+Accuracy of 0.85 on factual queries confirms the pipeline handles its primary use case correctly. When a user asks a specific question with a verifiable answer in one document, the hybrid retriever surfaces the right document and Claude answers accurately. Q2 and Q4 scored 1.0, covering AquaTrack's sensor deployment and AgriBoost's loan structure respectively. Q3 scored 0.9 on the HealthLink doctor-to-patient ratio. Q1 scored 0.5 because the system answered the funding amount correctly but missed the SaaS subscription pricing detail, which was in a different part of the document than the retrieved chunk.
+Faithfulness on factual queries sits at 0.525, lower than expected given the high accuracy. The evaluator flagged that Claude was regularly making claims not directly present in the retrieved 500-character chunks. This reflects a design decision in the pipeline: the RAG endpoint passes up to 1,500 characters of full document text to Claude rather than the raw retrieved chunks. Claude therefore has more context than the faithfulness evaluator is scoring against. This is a measurement gap rather than a genuine faithfulness failure, and it is worth stating plainly.
+Synthesis queries reveal retrieval coverage limits
+Accuracy of 0.20 on synthesis queries is the most significant finding. Q6 and Q8 scored 0.0 on accuracy. Q6 asked which proposals use Africa's Talking — the correct answer is three proposals, but the pipeline retrieved chunks from only one of them and Claude answered accordingly. Q8 asked which proposals have signed partnership agreements with financial institutions — the system answered that none do, directly contradicting the corpus, because the NBS Bank term sheet and NairobiPay letters of intent were not in the top retrieved chunks.
+Q5 scored 0.0 on accuracy due to a JSON parse error in the evaluator rather than a wrong answer. Its faithfulness score of 0.5 suggests the answer itself was reasonable. This is an evaluator failure, not a pipeline failure.
+The root cause across synthesis queries is retrieval coverage. The pipeline returns the top 3 results after deduplication. A synthesis question that requires three specific documents will only be answered correctly if the retriever surfaces all three. With 12 documents in the corpus and top_k set to 3, there is no guarantee the right combination is retrieved on any given query.
+Increasing top_k to 5 for synthesis queries made accuracy worse, not better, dropping from 0.20 to 0.163. Retrieving more documents introduced additional noise into Claude's context, diluting the relevant signal rather than improving it. This confirms that the problem is retrieval precision, not retrieval breadth.
+Conceptual queries reflect corpus size limits
+Accuracy of 0.225 on conceptual queries reflects the difficulty of open-ended theme questions against a small corpus. Q11 scored 0.7 on environmental sustainability, correctly covering three proposals. Q9 scored 0.45 on last-mile connectivity, covering two of the four proposals the ground truth expected. Q10 scored 0.0 because the system stated that none of the proposals have existing traction data, directly contradicting the corpus. The traction sections of ClearFast, CleanChain, NairobiPay, and KivuHarvest were not surfaced by the retriever on that query.
+Faithfulness is lowest on conceptual queries at 0.200, reflecting that Claude draws most heavily on general knowledge when answering broad thematic questions rather than anchoring to the specific chunks retrieved.
+5. Key Takeaway
+The evaluation produced three clear findings. The pipeline performs well on factual lookups against a single document, which is its primary use case. Cross-document synthesis is limited by retrieval coverage — the pipeline cannot reliably answer questions that require combining information from multiple specific documents when only the top 3 results are retrieved. Faithfulness scores are consistently moderate across all query types, partly because the faithfulness evaluator scores against retrieved chunks while the pipeline passes full document text to Claude, creating a measurement gap that makes faithfulness harder to interpret than accuracy.
+These findings are diagnostic rather than surprising. A RAG pipeline over 12 documents with top_k set to 3 is well-suited for targeted factual queries and less suited for broad synthesis questions. Increasing the corpus size, tuning top_k per query type, or routing different question types to different retrieval strategies are all directions worth exploring as the system grows.

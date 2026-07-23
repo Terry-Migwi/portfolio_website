@@ -1,0 +1,74 @@
+﻿Retrieval-Augmented Generation: How Denta Answers Questions From the Clinic's Own Documents
+This article covers the RAG pipeline behind Denta's FAQ chain, ingestion, embedding, and retrieval, and how it connects to the session memory covered in the previous article.
+1. Scene
+A patient messages Denta asking what a root canal costs, or whether the clinic accepts insurance, or what the opening hours are on Saturday. The assistant needs to answer with the clinic's actual pricing and policies, not with whatever a language model happens to already know about dentistry in general.
+Retrieval-augmented generation, RAG, is a technique where a language model's answer is grounded in specific documents retrieved at the moment a question is asked, rather than relying only on what the model learned during training. Instead of asking the model to answer from memory, the system first searches a store of the business's own documents for the pieces relevant to the question, then hands only those pieces to the model alongside the question itself. I used this approach because a language model on its own has no knowledge of this clinic specifically, and RAG lets it answer from the clinic's actual, current documentation instead.
+2. Problem
+A language model was not trained on this clinic's pricing list, its hours, or its payment plans. Even if those details were pasted into a prompt by hand, a document that size would not fit into every single message, and it would need to be kept in sync manually every time a price changed. What the assistant needed was a way to search only the parts of the document relevant to a given question, at the moment that question was asked, rather than relying on the model's own memory or resending the entire document on every request.
+3. Approach
+Preparing the document for retrieval
+Before Denta can answer anything, the clinic's FAQ document has to be split into smaller pieces and stored somewhere searchable. I built ingest_pinecone.py to do this once, run manually rather than on every server startup, since re-embedding the same document on every deploy would be wasted work. How the document gets split is its own decision with enough depth to cover separately, so this article keeps the chunking step light and focuses on what happens once the chunks exist.
+Each chunk gets embedded, turned into a numerical vector representing its meaning, using a HuggingFace model.
+def get_embeddings():
+    return HuggingFaceEndpointEmbeddings(
+        model="sentence-transformers/all-MiniLM-L6-v2",
+        huggingfacehub_api_token=HUGGING_FACE_API
+    )
+	all-MiniLM-L6-v2 outputs a 384-dimension vector, which is why the Pinecone index is created with dimension=384, that number has to match exactly between the embedding model and the vector store, or every write fails.
+I used Pinecone to store and search these embeddings. Pinecone is a managed vector database, a service built specifically to store embeddings and answer similarity searches, given a query vector, which stored vectors are closest to it, quickly, even across large collections. I chose it for this project mainly because it is serverless, there is no database server to provision, size, or maintain myself, and it has a usable free tier, which matters for a project like this one that is not yet running at production scale. Running my own vector search, whether in a self-managed database or a library like FAISS, would mean handling the indexing and scaling work myself. Pinecone handles that as a managed service instead.
+Pinecone's serverless index creation is asynchronous, so I added a guard that polls until the index reports ready before anything tries to write to it.
+while not pc.describe_index(INDEX_NAME).status["ready"]:
+    print("Waiting for index to be ready...")
+    time.sleep(2)
+	Without this, a script run immediately after index creation could try to store vectors into an index that technically exists but isn't accepting writes yet.
+Retrieving and answering at request time
+query.py is what actually runs on every incoming FAQ message. It loads the same vectorstore ingest_pinecone.py built, without re-embedding anything, and wraps it as a retriever.
+vectorstore = load_vectorstore()
+retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+	k=2 means every question pulls back the two most relevant chunks, not the whole document. That is the actual retrieval step, turning the patient's question into an embedding, comparing it against every stored chunk's embedding, and returning the closest matches.
+The system prompt is what tells the model how to use those retrieved chunks, and what to do when they don't actually contain the answer.
+RAG_SYSTEM_PROMPT = f"""You are a helpful assistant for {BUSINESS_NAME}.
+Use the following retrieved context to answer the customer's question.
+If the answer is not in the context, use your general {BUSINESS_DOMAIN} knowledge
+but make clear it is general information. For business-specific questions you cannot
+answer, suggest they call {BUSINESS_PHONE}.
+Do not add closing remarks or unsolicited advice.
+ 
+Context:
+{{context}}
+"""
+	Retrieval does not guarantee the two closest chunks actually contain the answer to whatever was asked, only that they are the closest matches available. This prompt handles that gap explicitly rather than leaving the model to guess silently. It's instructed to answer from the retrieved context when it can, fall back to general domain knowledge when it can't, but say plainly that it's doing so, and point the patient to a phone number for anything specific to the business that neither source covers. The instruction against closing remarks and unsolicited advice keeps replies from padding out into the kind of generic chatbot filler that reads as unhelpful over SMS, where every extra sentence costs the patient reading time and, on this channel, an actual per-message fee.
+The chain itself is built with LangChain's pipe syntax, each stage's output feeding into the next.
+base_chain = (
+    {
+        "context": lambda x: format_docs(retriever.invoke(x["input"])),
+        "input": lambda x: x["input"],
+        "history": lambda x: x.get("history", [])
+    }
+    | prompt
+    | llm
+    | StrOutputParser()
+)
+	The first stage runs three things in parallel for every incoming question, retrieves the relevant chunks and joins them into one string, passes the raw question through, and passes through whatever conversation history exists so far. All three feed into prompt, which combines the system prompt above, the conversation history, and the current question into the exact input the model sees.
+StrOutputParser sits at the very end of the chain. When llm runs, its raw return value is not plain text, it's a structured message object carrying the reply content alongside metadata, things like the stop reason, token usage, and the role of who's speaking. That structure is useful in places, but chain_with_memory.invoke() needs to hand _handle_faq a plain string, since that's what gets logged, appended to the session history, and eventually sent to send_sms. StrOutputParser is the step that reaches into that structured object and pulls out just the reply text, discarding everything else in the response. Without it, the chain would return the full message object, and every caller downstream would need to know how to unwrap it themselves rather than that unwrapping happening once, in one place, at the end of the chain.
+Memory is wired in separately, on top of this base chain, using the SessionManager covered in the previous article.
+session_manager = SessionManager(ttl_seconds=1800)
+ 
+def get_session_history(session_id: str):
+    return session_manager.get_session_history(session_id)
+ 
+chain_with_memory = RunnableWithMessageHistory(
+    base_chain,
+    get_session_history,
+    input_messages_key="input",
+    history_messages_key="history"
+)
+	This is the same RunnableWithMessageHistory wrapper from the session management article, doing the same job here it does for the booking agent, looking up the right history by session ID, injecting it before the chain runs, and appending the new exchange afterward. The FAQ chain and the booking agent are two different chains built on two different session stores, but they share this exact memory-wiring pattern.
+4. Results
+I asked the assistant a pricing question directly, without any prior context in the conversation, to confirm the chain retrieves and answers from the real document rather than a general knowledge guess.
+  
+
+The assistant answering a pricing question with the clinic's real implant and crown costs, tagged with the faq intent.
+The answer includes the implant cost, the crown cost, the bone graft cost range, and the payment plan detail, all of which live only in the clinic's pricing document, not in anything a general-purpose model would know on its own. The response is also tagged faq, confirming the intent classifier routed it correctly before the RAG chain ever ran.
+5. Key Takeaway
+A RAG pipeline is really two separate jobs done at two separate times. Preparing the document, splitting it and embedding it into something searchable, happens once, offline, and never touches a patient's actual conversation. Answering a question happens on every message, and depends entirely on the preparation step having been done correctly beforehand. A managed vector database like Pinecone removes the infrastructure work of running that search myself, provisioning, scaling, and maintaining a database, so the actual engineering effort goes into the parts specific to this assistant, how the document is prepared and how the retrieved context is used, rather than into running search infrastructure from scratch.

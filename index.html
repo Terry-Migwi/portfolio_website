@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terry Migwi — AI Engineer . Data Scientist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --black: #0f0f0f;
+    --white: #ffffff;
+    --gray-50: #f7f7f5;
+    --gray-100: #ebebeb;
+    --gray-300: #b0b0a8;
+    --gray-500: #6b6b65;
+    --gray-700: #3a3a38;
+    --teal-50: #e1f5ee;
+    --teal-400: #1D9E75;
+    --teal-600: #0F6E56;
+    --teal-800: #085041;
+    --radius-sm: 6px;
+    --radius-md: 12px;
+    --font-sans: 'Inter', system-ui, sans-serif;
+    --font-display: 'DM Serif Display', Georgia, serif;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--white);
+    color: var(--black);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  /* NAV */
+  nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 2rem;
+  background: rgba(255,255,255,0.9);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--gray-100);
+  pointer-events: none;
+}
+
+nav a, nav span {
+  pointer-events: auto;
+}
+
+  .nav-logo {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    color: var(--black);
+    letter-spacing: -0.01em;
+  }
+
+  .nav-links {
+    display: flex; gap: 2rem; list-style: none;
+  }
+
+  .nav-links a {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--gray-500);
+    transition: color 0.2s;
+  }
+
+  .nav-links a:hover { color: var(--black); }
+
+  /* HERO */
+  .hero {
+    min-height: 100vh;
+    display: flex; align-items: center;
+    padding: 7rem 2rem 4rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .hero-inner {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 5rem;
+    align-items: center;
+    width: 100%;
+  }
+
+  /* LEFT: photo + name */
+  .hero-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.75rem;
+  }
+
+  .hero-photo {
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    object-fit: cover;
+    object-position: center top;
+    border: 3px solid var(--gray-100);
+  }
+
+  .hero-name {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--black);
+  }
+
+  /* RIGHT: eyebrow, tagline, buttons */
+  .hero-right {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--teal-600);
+    margin-bottom: 1rem;
+  }
+
+  .hero-eyebrow-dot {
+    width: 6px; height: 6px;
+    background: var(--teal-400);
+    border-radius: 50%;
+  }
+
+  .hero-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 2.5vw, 2rem);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--black);
+    margin-bottom: 1rem;
+  }
+
+  .hero-tagline {
+    font-size: 1rem;
+    color: var(--gray-500);
+    line-height: 1.7;
+    margin-bottom: 2rem;
+    max-width: 44ch;
+  }
+
+  .hero-tagline strong {
+    color: var(--black);
+    font-weight: 500;
+  }
+
+  .hero-ctas {
+    display: flex; gap: 0.75rem; flex-wrap: wrap;
+  }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 0.65rem 1.25rem;
+    background: var(--black);
+    color: var(--white);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background 0.2s;
+    border: 1.5px solid var(--black);
+  }
+
+  .btn-primary:hover { background: var(--gray-700); }
+
+  .btn-secondary {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 0.65rem 1.25rem;
+    background: transparent;
+    color: var(--black);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-weight: 500;
+    border: 1.5px solid var(--gray-100);
+    transition: border-color 0.2s, background 0.2s;
+  }
+
+  .btn-secondary:hover { border-color: var(--gray-300); background: var(--gray-50); }
+
+  /* SECTIONS */
+  section {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 5rem 2rem;
+  }
+
+  .section-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gray-300);
+    margin-bottom: 0.5rem;
+  }
+
+  .section-heading {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    letter-spacing: -0.02em;
+    color: var(--black);
+    margin-bottom: 1rem;
+  }
+
+  .section-divider {
+    height: 1px;
+    background: var(--gray-100);
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  /* ABOUT */
+  .about-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 4rem;
+    align-items: start;
+    margin-top: 2.5rem;
+  }
+
+  .about-body {
+    font-size: 1.05rem;
+    color: var(--gray-700);
+    line-height: 1.75;
+  }
+
+  .about-body p + p { margin-top: 1rem; }
+
+  .about-body strong { color: var(--black); font-weight: 500; }
+
+  .about-stats {
+    display: flex; flex-direction: column; gap: 1.5rem;
+  }
+
+  .stat-item {
+    padding: 1.25rem;
+    background: var(--gray-50);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--gray-100);
+  }
+
+  .stat-number {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    color: var(--black);
+    line-height: 1;
+    margin-bottom: 0.25rem;
+  }
+
+  .stat-label {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+    font-weight: 500;
+  }
+
+  /* PROJECTS */
+  .projects-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    margin-top: 2.5rem;
+  }
+
+  .project-card {
+    border: 1px solid var(--gray-100);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .project-card:hover {
+    border-color: var(--gray-300);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+  }
+
+  .project-video-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: var(--black);
+    overflow: hidden;
+  }
+
+  .project-video-wrap video,
+  .project-video-wrap iframe {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    border: none;
+  }
+
+  .project-video-placeholder {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 1rem;
+    background: linear-gradient(135deg, #0d1a14 0%, #0a1a10 100%);
+    color: #4a8a6a;
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    text-align: center;
+    padding: 2rem;
+  }
+
+  .project-video-placeholder .play-hint {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 0.7rem;
+    color: #2a5a3a;
+    margin-top: 0.5rem;
+  }
+
+  .video-play-btn {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: rgba(29,158,117,0.15);
+    border: 1.5px solid rgba(29,158,117,0.4);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .video-play-btn:hover { background: rgba(29,158,117,0.25); }
+
+  .video-play-btn svg { width: 18px; height: 18px; fill: var(--teal-400); }
+
+  .project-body {
+    padding: 1.5rem 1.75rem 1.75rem;
+  }
+
+  .project-header {
+    display: flex; align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .project-name {
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    color: var(--black);
+    letter-spacing: -0.01em;
+  }
+
+  .project-live-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--teal-600);
+    border: 1px solid var(--teal-50);
+    background: var(--teal-50);
+    border-radius: 100px;
+    padding: 0.25rem 0.65rem;
+    white-space: nowrap;
+    transition: background 0.2s;
+    margin-top: 3px;
+  }
+
+  .project-live-link:hover { background: #c0eedd; }
+
+  .project-live-link svg { width: 11px; height: 11px; }
+
+  .project-description {
+    font-size: 0.9rem;
+    color: var(--gray-500);
+    line-height: 1.65;
+    margin-bottom: 1.1rem;
+  }
+
+  .project-impact {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--teal-800);
+    background: var(--teal-50);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.75rem;
+    margin-bottom: 1.1rem;
+    width: fit-content;
+  }
+
+  .project-impact svg { width: 13px; height: 13px; color: var(--teal-400); flex-shrink: 0; }
+
+  .project-stack {
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+
+  .stack-tag {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--gray-500);
+    background: var(--gray-50);
+    border: 1px solid var(--gray-100);
+    border-radius: 100px;
+    padding: 3px 10px;
+  }
+
+  /* GITHUB CARD */
+  .project-github-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: #0d1117;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 1rem;
+    text-align: center;
+    padding: 2rem;
+  }
+
+  .project-github-wrap svg { color: #4a7a9a; }
+
+  .github-label {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    color: #3a6070;
+    line-height: 1.8;
+  }
+
+  .github-link-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 0.55rem 1.1rem;
+    background: transparent;
+    border: 1px solid #2a4060;
+    border-radius: var(--radius-sm);
+    color: #7db8d0;
+    font-size: 0.8rem;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    text-decoration: none;
+    margin-top: 0.5rem;
+  }
+
+  .github-link-btn:hover { border-color: #4a7090; color: #a0d0e8; }
+
+  /* FOOTER */
+  footer {
+    border-top: 1px solid var(--gray-100);
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: center;
+  }
+
+  .footer-links {
+    display: flex; gap: 2rem;
+  }
+
+  .footer-links a {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--gray-500);
+    transition: color 0.2s;
+  }
+
+  .footer-links a:hover { color: var(--black); }
+
+  .footer-links svg { width: 16px; height: 16px; }
+
+  /* RESPONSIVE */
+  @media (max-width: 768px) {
+    nav { padding: 1rem; }
+    .nav-links { display: none; }
+    .hero-inner { grid-template-columns: 1fr; gap: 2.5rem; }
+    .hero-left { align-items: flex-start; text-align: left; }
+    .about-grid { grid-template-columns: 1fr; gap: 2rem; }
+    .about-stats { flex-direction: row; }
+    footer { justify-content: flex-start; }
+  }
+
+  .stats-bar {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  margin-top: 2.5rem;
+  margin-bottom: 2rem;
+}
+
+.stats-bar .stat-item {
+  flex: 1;
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <span class="nav-logo">Terry Migwi</span>
+  <ul class="nav-links">
+    <li><a href="#about">About</a></li>
+    <li><a href="#projects">Projects</a></li>
+    <li><a href="mailto:terrymigwi@gmail.com">Contact</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-inner">
+
+    <!-- LEFT: photo and name -->
+    <div class="hero-left">
+      <h1 class="hero-name">Terry Migwi</h1>
+      <img src="terry.jpg" alt="Terry Migwi" class="hero-photo">
+      
+    </div>
+
+    <!-- RIGHT: title, tagline, buttons -->
+    <div class="hero-right">
+      <h2 class="hero-title">AI Engineer . Data Scientist</h2>
+      <p class="hero-tagline">
+        Building AI systems that <strong>retrieve, reason, and respond</strong> from prototype to production.
+      </p>
+      <div class="hero-ctas">
+        <a href="#projects" class="btn-primary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          View projects
+        </a>
+        <a href="https://github.com/Terry-Migwi" target="_blank" class="btn-secondary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          GitHub
+        </a>
+        <a href="https://linkedin.com/in/terry-migwi" target="_blank" class="btn-secondary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+          LinkedIn
+        </a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section-divider"></div>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="section-label">Background</div>
+  <h2 class="section-heading">About me</h2>
+  <div class="about-grid" style="grid-template-columns: 1fr;">
+    <div class="about-body">
+      <p>
+        I am an AI Engineer with five years in data science, working across automation, risk, analytics, and coaching. I have built workflow automation systems using Python and transformer models, developed risk scoring models for financial decision-making and learner support, and coached professionals on translating data and AI into business outcomes.
+      </p>
+      <p>
+        My focus now is retrieval-augmented generation, LLM agents, and real-time AI systems. The full stack from embedding models and vector stores through to async APIs, evaluation frameworks, and deployed endpoints.
+      </p>
+    </div>
+  </div>
+</section>
+
+<div class="section-divider"></div>
+
+<!-- PROJECTS -->
+<section id="projects">
+  <div class="section-label">Work</div>
+  <h2 class="section-heading">Projects</h2>
+
+    <div class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-number">123</div>
+      <div class="stat-label">Concurrent users, zero failures (Locust load test)</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number">153x</div>
+      <div class="stat-label">Relevance score improvement from cross-encoder re-ranking</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number">0.85</div>
+      <div class="stat-label">Factual accuracy on hybrid search eval (LLM-as-judge)</div>
+    </div>
+  </div>
+  <div class="projects-grid">
+
+
+    <!-- PROJECT 1: DENTA -->
+    <div class="project-card">
+      <div class="project-video-wrap">
+        <video controls>
+          <source src="messaging_assistant_demo.mp4" type="video/mp4">
+        </video>
+      </div>
+      <div class="project-body">
+        <div class="project-header">
+          <h3 class="project-name">Denta . Messaging Assistant</h3>
+          <a href="https://huggingface.co/spaces/Tee-M/messaging-assistant" target="_blank" class="project-live-link">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Live on HF Spaces
+          </a>
+        </div>
+        <p class="project-description">
+          Denta is a messaging assistant that answers customer questions grounded in a business's own documentation, then hands off to a tool-calling agent that checks real calendar availability, creates genuine bookings, records the appointment, and sends a follow-up reminder 24 hours before. Built for a dental clinic but designed for any business that provides customer support and takes bookings or appointments over a messaging tool.
+        </p>
+        <div class="project-impact">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          Load tested at 123 concurrent users with zero failures
+        </div>
+        <div class="project-stack">
+          <span class="stack-tag">LangGraph</span>
+          <span class="stack-tag">Claude Haiku</span>
+          <span class="stack-tag">Pinecone</span>
+          <span class="stack-tag">HuggingFace</span>
+          <span class="stack-tag">FastAPI</span>
+          <span class="stack-tag">Celery + Redis</span>
+          <span class="stack-tag">Google Calendar API</span>
+          <span class="stack-tag">Africa's Talking</span>
+          <span class="stack-tag">Docker</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROJECT 2: HYBRID SEARCH -->
+    <div class="project-card">
+      <div class="project-video-wrap">
+        <video controls>
+          <source src="hybrid_search_demo.mp4" type="video/mp4">
+        </video>
+      </div>
+      <div class="project-body">
+        <div class="project-header">
+          <h3 class="project-name">Hybrid Search . Document Search Engine</h3>
+          <a href="https://huggingface.co/spaces/Tee-M/semantic_search" target="_blank" class="project-live-link">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Live on HF Spaces
+          </a>
+        </div>
+        <p class="project-description">
+          A hybrid search engine that combines semantic search and keyword search. It retrieves the right documents regardless of the query type, then uses an LLM to synthesize direct answers from the retrieved content. The API is secured with JWT authentication and built with input guardrails and circuit-breaker resilience patterns. It is ideal for searching proposals, contracts, reports, or internal knowledge bases.
+        </p>
+        <div class="project-impact">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          Cross-encoder re-ranking widened the relevance score gap by 153x on named entity queries
+        </div>
+        <div class="project-stack">
+          <span class="stack-tag">Pinecone</span>
+          <span class="stack-tag">BM25</span>
+          <span class="stack-tag">Cross-encoder</span>
+          <span class="stack-tag">LangChain</span>
+          <span class="stack-tag">Claude Haiku</span>
+          <span class="stack-tag">FastAPI</span>
+          <span class="stack-tag">HuggingFace</span>
+          <span class="stack-tag">Docker</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROJECT 3: TOURNAMENTIQ -->
+    <div class="project-card">
+      <div class="project-github-wrap">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        <div class="github-label">
+          # tournamentiq<br>
+          live match intelligence . 2026 FIFA World Cup<br>
+        </div>
+        <a href="https://github.com/Terry-Migwi/TournamentIQ" target="_blank" class="github-link-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <div class="project-body">
+        <div class="project-header">
+          <h3 class="project-name">TournamentIQ . Live Match Intelligence</h3>
+        </div>
+        <p class="project-description">
+          A live AI match intelligence platform built on 2026 FIFA World Cup data. It combines Elo ratings, a Poisson probability model with Bayesian inference, a LangChain ReAct agent, and a LangGraph tiered orchestration layer to generate narrative match intelligence briefs.
+        </p>
+        <div class="project-impact">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          Elo ratings with Poisson V4, Laplace smoothing, Winsorization, and recency weighting
+        </div>
+        <div class="project-stack">
+          <span class="stack-tag">LangGraph</span>
+          <span class="stack-tag">LangChain ReAct</span>
+          <span class="stack-tag">Claude Haiku/Sonnet</span>
+          <span class="stack-tag">SQLAlchemy</span>
+          <span class="stack-tag">Pydantic</span>
+          <span class="stack-tag">Tavily</span>
+          <span class="stack-tag">SQLite</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROJECT 4: ATTENDANCE TRACKER -->
+    <div class="project-card">
+      <div class="project-github-wrap">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        <div class="github-label">
+          # attendance-tracker<br>
+          automated learner attendance . Python<br>
+          2 hours reduced to under 10 minutes per week
+        </div>
+        <a href="https://github.com/Terry-Migwi/Attendance-Tracking" target="_blank" class="github-link-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <div class="project-body">
+        <div class="project-header">
+          <h3 class="project-name">Attendance Tracker . Learner Attendance Automation</h3>
+        </div>
+        <p class="project-description">
+          A Python automation that tracks learner attendance. It compares a learner roster against session attendance exports, identifies absentees, and produces a clean output spreadsheet, completing the process in under 5 minutes. It reduced weekly attendance tracking from 2 hours to under 10 minutes.
+        </p>
+        <div class="project-impact">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          Reduced weekly attendance tracking from 2 hours to under 10 minutes
+        </div>
+        <div class="project-stack">
+          <span class="stack-tag">Python</span>
+          <span class="stack-tag">Pandas</span>
+          <span class="stack-tag">OpenPyXL</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/Terry-Migwi" target="_blank">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      GitHub
+    </a>
+    <a href="https://linkedin.com/in/terry-migwi" target="_blank">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+      LinkedIn
+    </a>
+    <a href="mailto:terrymigwi@gmail.com">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      Email
+    </a>
+  </div>
+</footer>
+
+</body>
+</html>

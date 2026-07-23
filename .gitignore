@@ -1,0 +1,5 @@
+.env
+portfolio-env/
+__pycache__/
+*.Zone.Identifier
+*.pyc

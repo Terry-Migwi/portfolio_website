@@ -1,0 +1,116 @@
+﻿Messaging Assistant: How the Messaging Assistant Hallucinated a Confirmed Booking
+This article documents a real production bug found while wiring Denta's booking orchestration into the live webhook, and what it reveals about testing AI systems for reliability. The bot told a patient their appointment was confirmed, with a correct name, date, and time, and never wrote a single event to the calendar.
+1. Scene
+I tested the booking component of Denta using the same shape of conversation twice and got two different results. The first booking correctly identified an existing conflict on the calendar, checked the real slots, and offered two accurate alternatives before confirming one of them.
+  
+
+The assistant reporting that 10:00 AM is not available and offering 09:30 and 10:30 as alternatives.
+That result built real confidence in the system. The second booking came back with a confirmation formatted identically to the first, patient name, service, date, and time, all correct, with no booking event appearing in the calendar. No reference ID appeared in the reply either.
+  
+
+The hallucinated confirmation for Marilyn Monroe, teeth cleaning, Monday 13 July 2026 at 12:00 PM, with no reference ID.
+2. Problem
+Hallucination, in the context of a large language model, is when the model produces output that is fluent and plausible but not grounded in anything true, a fact, a database record, or a real event. 
+In this case, the assistant generated a confirmation message with the correct patient name, the correct date, and the correct time, none of which it retrieved from a calendar or a database on that turn. It had no tool available to check or create a booking. It produced those specific, accurate-looking details from conversation context alone, and presented them as a completed action that had never taken place.
+3. Approach
+This section documents the two bugs that produced the hallucinated message, and the fix applied to each one.
+Bug one: The intent classifier misclassified the confirming message
+Denta routes every incoming message through classify_intent, a function that asks Claude to label the message as faq, booking, or general, then dispatches it to the matching handler. The confirming message in the failed booking, "Yes confirm," was classified as faq instead of booking.
+The original classifier asked the model to reply with a single word and parsed that reply as plain text.
+response = client.messages.create(
+    model=MODEL,
+    max_tokens=10,
+    system=INTENT_PROMPT,
+    messages=[{"role": "user", "content": message}]
+)
+intent = response.content[0].text.strip().lower()
+ 
+if intent not in ("faq", "booking", "general"):
+    logger.warning(f"Unexpected intent '{intent}' — defaulting to faq")
+    intent = "faq"
+	
+
+On a short, context-free message like "Yes confirm," the model did not return one of the three expected words. It returned a free-text sentence instead. The fallback caught that correctly and defaulted to faq, but faq was the wrong default for a message that was, in context, clearly a booking confirmation.
+How I fixed this:
+A classifier that returns free text has no guarantee of returning one of the three labels needed. I forced the classification through a tool call instead, using the same tool_choice mechanism covered in the extraction article, so the model's output is constrained by the API itself rather than by a hopeful prompt instruction. I gave the model a single tool with an enum field restricting the answer to exactly three values, and forced the tool choice onto that tool, so the model cannot return anything else.
+_INTENT_TOOL = [{
+    "name": "classify_intent",
+    "description": "Classify the customer's message into exactly one category.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "intent": {
+                "type": "string",
+                "enum": ["faq", "booking", "general"],
+            }
+        },
+        "required": ["intent"],
+    },
+}]
+ 
+response = client.messages.create(
+    model=MODEL,
+    max_tokens=50,
+    system=INTENT_PROMPT,
+    messages=[{"role": "user", "content": message}],
+    tools=_INTENT_TOOL,
+    tool_choice={"type": "tool", "name": "classify_intent"},
+)
+	Bug one, part two: the token limit was too tight for a forced call
+Forcing the tool choice on its own was not enough. The first forced call I ran came back with an empty input, because the original ten-token limit was too tight for the model to complete its own forced JSON output.
+
+
+How I fixed this:
+I raised the token budget to fifty, and the forced call started returning a complete, valid input on every run.
+Bug two: the three intents shared one session manager
+Denta uses a SessionManager to hold each patient's conversation history, keyed by phone number, so a chain can pick up where a conversation left off. It is a useful and necessary piece of the system, which I have covered in a separate article. The relevant detail here is narrower. All three intents, faq, booking, and general, were reading from and writing to the same SessionManager instance.
+That meant a single shared conversation history existed per phone number, regardless of which chain was currently talking to the patient. When the misclassified "Yes confirm" message was routed to the FAQ chain, that chain read the same history the booking agent had just written to, a conversation where a name, a date, and a time had already been collected and a confirmation had already been requested. The FAQ chain has no tools and cannot check or write to a calendar. It answered the only way a text model can, given a conversation shaped like that. It wrote the next plausible line, a complete, confident booking confirmation, with no way of knowing that line was false.
+How I fixed this:
+I gave the booking flow its own dedicated session manager, entirely separate from the one the FAQ and general chains use.
+booking_session_manager = SessionManager(ttl_seconds=1800)
+	I added a method to check whether a booking conversation is already active, and used it to skip classification entirely once a booking is underway, routing straight back to the booking agent instead of risking another misclassification.
+def has_active_session(self, session_id: str) -> bool:
+    if session_id not in self._sessions:
+        return False
+    session = self._sessions[session_id]
+    age = time.time() - session["last_active"]
+    if age > self.ttl_seconds:
+        return False
+    return len(session["history"].messages) > 0
+	if booking_session_manager.has_active_session(from_number):
+    intent = "booking"
+else:
+    intent = classify_intent(text)
+	Once a booking conversation starts, every reply in that session goes straight to the booking agent, bypassing classification entirely until the booking either completes or the session expires.
+What else caused it
+These two bugs together were the complete cause. Neither one alone would have produced a hallucinated confirmation. A misclassification with no prior booking history in the shared session would have sent the FAQ chain a message with nothing to fabricate from, and it would have answered honestly that it could not process a booking. The FAQ chain only had the specific name, date, and time to draw on because a booking conversation had already run in that same session and left its details behind in shared memory. It took both the misroute and the shared memory together to produce the specific failure I saw. I did not find a third, independent cause beyond these two.
+4. Results
+I reran the exact sequence that had failed twice before, on a fresh phone number, through all three fixes.
+The server log showed Appointment created, with a reference ID matching the one returned in the confirmation.
+  
+
+Server log showing the appointment created and the confirmation reply with a matching reference ID.
+  
+
+The real event as it appears in Google Calendar.
+I ran a latency check on the confirming request, the one that now triggers extraction, a database write, and reminder scheduling in the background, against a plain FAQ request as a baseline.
+  
+
+Baseline FAQ request timing: 6.867 seconds.
+  
+
+Confirming booking request timing: 5.038 seconds.
+I also checked the trace in LangSmith, in Trace View. The call_llm node's output showed the model requesting confirmation before calling the tool, then the run_tools node's output showed the book_appointment tool call with the correct arguments, and the tool's own return string held the real confirmation, sitting next to the model's reasoning as separately verifiable evidence.
+  
+
+LangSmith trace: call_llm and run_tools nodes, with the assistant confirming details before calling book_appointment.
+  
+
+LangSmith trace: the book_appointment tool call with its arguments, date, patient name, phone, service, and time.
+  
+
+LangSmith trace: the tool's own return value showing the real reference ID, matching the assistant's final reply to the patient.
+5. Key Takeaway
+I tested two bookings with the same conversation shape and got one real result and one fabricated result, and nothing in the reply text told them apart. Both looked like success.
+The usual concern with an LLM is that it hallucinates a fact, a wrong date, a made-up statistic, something stated in plain text. What happened here was the model hallucinating the outcome of a tool call it never made. It described a calendar write as having happened when no such write occurred, in a system that was specifically built with tools so the model would never have to guess at real-world state. That is a more dangerous failure mode than a wrong sentence, because the entire design of tool calling exists to prevent exactly this, and the failure still found a way through.
+The fix here was not one bug. It was two ordinary mistakes, a classifier that could fail silently and a memory store shared by chains that should never have shared it, that combined into a failure the code itself never announced. It had no exception or error log. Just a correct-sounding sentence standing in for something that never took place. Finding it took going past the model's own account of itself, into the logs and the trace that showed what the system actually did.

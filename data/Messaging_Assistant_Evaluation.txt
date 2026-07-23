@@ -1,0 +1,47 @@
+﻿Evaluating Denta's RAG Pipeline: LLM-as-Judge vs RAGAS
+This article documents how Denta's RAG pipeline was evaluated using two different methods, a custom set of LLM-as-judge evaluators and the RAGAS framework, run against the same eight ground-truth questions.
+1. Scene
+Evaluating a RAG system means measuring how well it retrieves and answers, against a fixed set of questions, in a way that produces the same result every time it's rerun. Four things are considered:
+* Context precision. Whether the chunks retrieved for a question are actually relevant to it.
+* Context recall. Whether the retrieved chunks contain everything needed to answer correctly, even if some of what was retrieved is irrelevant.
+* Faithfulness. Whether the generated answer is grounded in what was retrieved, rather than stating things the retrieved chunks never supported.
+* Answer relevance. Whether the answer addresses the question that was asked, independent of whether it's factually grounded.
+2. Problem
+Reading generated answers by eye doesn't scale, and it isn't consistent, one reviewer's sense of "close enough" differs from another's, and the same reviewer's judgment drifts across sessions. Evaluating a RAG system matters because it replaces that impression with a repeatable measurement, one that can be rerun against the same questions after any change to chunking, retrieval, or the prompt, and produce scores that mean the same thing each time.
+3. Approach
+Two evaluation methods were used, a custom set of LLM-as-judge evaluators built from scratch, and RAGAS, an established open-source framework built specifically for evaluating RAG pipelines.
+I built eight ground-truth question-and-answer pairs covering a spread of the clinic's FAQ document, pricing, hours, payment methods, and location. Both evaluation methods run against this same fixed set, which is what makes comparing their scores meaningful.
+Custom evaluators, using an LLM as a judge
+Four separate evaluator functions were built, one per metric, each one a model call that returns both a numeric score and a written justification for that score, not just a number on its own. I built an orchestrator script that runs the full pipeline for each question, retrieves chunks, generates an answer using the same system prompt style as production, and then runs all four evaluators against the result. Scores are aggregated into an average per metric, printed as a table, and saved to a report file alongside every question's reasoning, so a low score can be traced back to exactly why the judge scored it that way.
+RAGAS
+RAGAS implements its own versions of the same four metrics, context precision, context recall, faithfulness, and what it calls answer relevancy. I built a second script that collects the same question, answer, retrieved context, and ground truth for all eight questions, formats them into the structure RAGAS expects, and runs its evaluation using an LLM as the underlying judge model and an embedding model for the relevancy calculation specifically. This was run alongside the custom evaluators, not to replace them, but to see whether an independently built, widely used framework agreed with a bespoke one built from scratch.
+4. Results
+Metric
+	Custom Evaluator
+	RAGAS
+	Agreement
+	Context precision
+	0.6875
+	0.875
+	Diverge
+	Context recall
+	0.875
+	0.875
+	Match exactly
+	Faithfulness
+	0.775
+	0.4604
+	Diverge sharply
+	Answer relevance
+	0.90
+	0.6488
+	Diverge sharply
+	
+
+Context recall landed on the exact same number in both frameworks. This is because recall is close to a mechanical fact-matching exercise, does the ground truth's list of facts appear somewhere in the retrieved chunks, and when the facts are unambiguous, dates, prices, addresses, both frameworks counted the same things present or missing.
+Context precision diverged in the opposite direction from what might be expected, RAGAS scored retrieval as more precise than the custom evaluator did. The custom evaluator, in several questions, marked a second retrieved chunk as irrelevant when it covered a different service's pricing sitting in the same table as the one actually asked about, for example a braces pricing row appearing alongside implant pricing when the question was about implants. RAGAS's own precision calculation appears more forgiving of that kind of adjacency.
+Faithfulness is where the two frameworks disagreed the most. The custom evaluator's score of 0.775 mostly deducted points for small, clearly cosmetic additions, the generated answer naming the clinic when the retrieved chunk never stated the clinic's name, or a closing line like "feel free to contact us" that isn't grounded in anything retrieved but also isn't a factual error. RAGAS's much lower 0.4604 suggests its underlying method is stricter, likely decomposing each answer into a larger set of atomic claims and checking each one for direct entailment against the retrieved text, with less tolerance for conversational framing that a human reader wouldn't consider a hallucination.
+Answer relevance shows the same pattern in the opposite metric. The custom evaluator's 0.90 rewarded answers that went slightly beyond the literal question, adding a payment plan detail or a contact number, as genuinely more helpful to a real patient, not off-topic. RAGAS's answer relevancy metric works differently, it has the judge model generate a set of questions the given answer would plausibly be addressing, then measures the semantic similarity between those reconstructed questions and the one actually asked. An answer that adds extra information beyond the literal question dilutes that similarity score, even when the added information is genuinely useful to the person asking.
+On the question "How much does teeth cleaning cost?", both context precision and context recall scored 0.0, retrieval returned two chunks about teeth whitening and cosmetic treatments, and neither contained the actual teeth cleaning price. The generated answer correctly said it didn't have that information rather than guessing, which is the right behavior for a chain instructed not to fabricate, but the retrieval failure that caused it is a real gap.
+5. Key Takeaway
+The two evaluation frameworks judging the same eight answers agreed almost exactly on the metric that reduces to checking whether specific facts appear in a document. They disagreed sharply on the two metrics that require a judgment call about tone, completeness, and what counts as grounded enough. That split is the actual finding of this evaluation. An evaluation score is never a pure measurement of the answer. It is a measurement of the answer against whatever a specific rubric decides to count, and two reasonable rubrics can produce meaningfully different numbers from the exact same input.

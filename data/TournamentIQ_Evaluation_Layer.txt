@@ -1,0 +1,514 @@
+﻿TournamentIQ — Evaluating the Intelligence Layer
+TournamentIQ is an intelligent system that tracks team strength using live 2026 FIFA World Cup data. This article discusses how the intelligence layer was evaluated, what the results showed, and what remains unsolved.
+
+
+1. What are we evaluating?
+The intelligence layer takes a pre-match brief and translates it into a LikelihoodModifier, which is five float values that quantify how much each contextual factor should adjust the match probability. The evaluation tests whether that translation is correct.
+Specifically, the evaluation tests two things. First, whether the agent correctly reads the brief and produces modifier values that reflect what the brief actually says. Second, whether the LLM's judgment is calibrated, meaning strong signals produce strong values, weak signals produce weak values, and no signals produce near-zero values.
+The evaluation does not test whether Tavily found the right articles. That is a separate question about search quality. The evaluation isolates the agent's reasoning step only.
+
+
+2. Why are we evaluating?
+Using an LLM to translate evidence into numbers introduces four specific failure modes that are not visible from the output alone.
+* Hallucination. If both teams are at full strength with identical form and the brief says so, the modifier should be near zero across every field. If it is not, the agent is producing values that are not grounded in the brief.
+* Ambiguity. If the information in the brief is genuinely unclear, the modifier values should be modest. Large confident values on an ambiguous fixture mean the agent is overinterpreting uncertain information.
+* Player importance. If a bench player is missing, the agent should barely move the scores. If it produces a large impact on a player who has started once this tournament, the prompt or the weights are not correctly calibrating significance by player role.
+* Sign convention. The modifier fields are framed relative to the first-named team. A negative injury_impact means the first-named team is the one missing players. If the away team is the one in crisis, the sign should shift accordingly. Getting this wrong produces modifiers that move the probability in the wrong direction.
+
+
+3. How are we evaluating?
+The evaluation runs in two steps.
+Step 1 — Mock fixtures as ground truth
+Ten fixtures were created with controlled context. Each fixture defines exactly what the agent should find, what the modifier output should look like given that context, and why those ranges are correct.
+Using mock context rather than live Tavily results is deliberate. Live search results are not reproducible. Tavily may return different articles on different runs, making results incomparable. Mock context is static. The same input produces comparable output every time, which makes the evaluation a test of the agent's reasoning rather than a test of search quality.
+Each fixture was designed to test a specific failure mode:
+
+
+Fixture
+	Scenario
+	Context Summary
+	What It Tests
+	eval_001
+	Routine, no news
+	Both teams full strength. Brazil form WWWDW, Croatia WDWLW.
+	Baseline behaviour with no significant signals
+	eval_002
+	Star striker injured (home)
+	Mbappe ruled out 48 hours before kickoff. France form WWWWW.
+	Whether the agent identifies a high-impact absence
+	eval_003
+	Key defender suspended (away)
+	Van Dijk suspended. Netherlands no other absentees. Identical form.
+	Whether the agent applies the correct sign when the away team loses a player
+	eval_004
+	Heavy rotation (home)
+	Spain rotate seven players. Pedri, Rodri, Yamal all rested.
+	Whether the agent distinguishes deliberate rest from injury
+	eval_005
+	Both teams full strength, identical form
+	No injuries, suspensions, or rotation. Argentina and Germany both WWWWW.
+	Hallucination test. Any non-trivial modifier has no grounding
+	eval_006
+	Goalkeeper injury (away)
+	Courtois ruled out. Backup has not started in 14 months.
+	Whether the agent calibrates a positional absence correctly
+	eval_007
+	Minor injury, bench player (home)
+	Ao Tanaka doubtful. Has started one match this tournament.
+	Player importance test. A bench player missing should barely move the scores
+	eval_008
+	Multiple suspensions (away)
+	Mexico captain Edson Alvarez and starting left-back suspended.
+	Whether the agent scales the modifier when more than one player is out
+	eval_009
+	Ambiguous mixed signals
+	Morocco missing a centre-back but replacement performed well. Rodriguez doubtful but expected to start.
+	Ambiguity test. Modest values expected, not large confident ones
+	eval_010
+	Catastrophic crisis (home team)
+	Netherlands missing Van Dijk, Depay, and Gakpo. Brazil fully fit.
+	Sign convention test. The home team is in crisis, not the away team
+	
+
+Step 2 — LLM as a judge
+After running each fixture through the pipeline, Sonnet judges the modifier output against a three-criterion rubric. Each criterion is scored 1 to 3, where 3 is best and 1 is worst.
+Factual grounding measures whether the modifier values are supported by what the brief actually contains. A score of 3 means every non-zero field can be traced back to a specific fact in the brief. A score of 2 means most fields are supported but one is a reasonable inference that was not directly stated. A score of 1 means one or more fields reference something that is not in the brief at all.
+Magnitude reasonableness measures whether the float values are proportionate to the severity of what was found. A score of 3 means all values fall within the expected range for that scenario. A score of 2 means the values are pointing in the right direction but one field is over or underweighted. A score of 1 means one or more fields are outside the expected range or pointing in the wrong direction entirely.
+Hallucination presence measures whether the reasoning field invents facts that were never in the brief. A score of 3 means the reasoning only references facts that appear in the brief. A score of 2 means the reasoning contains one inference that goes slightly beyond what the brief states. A score of 1 means the reasoning invents a player name, a match result, or a fact that does not appear anywhere in the brief.
+The difference between factual grounding and hallucination presence is subtle but important. Factual grounding judges the modifier values themselves. Hallucination presence judges the reasoning the agent wrote to explain those values. A modifier can have correct values but hallucinated reasoning, which is exactly what happened on eval_005 shallow in one run. The agent produced the right numbers but wrote "no matches played yet" in the reasoning field when the brief clearly stated both teams had form strings of WWWWW. The numbers passed but the explanation failed.
+
+
+Factual grounding  — judges the float values
+Hallucination      — judges the written reasoning
+
+
+The total score is out of 9. A score of 7 or above is a pass. A score of 5 to 6 is marginal. A score below 5 is a fail.
+Sonnet judges Haiku's output. Using a stronger model as judge reduces self-serving bias. Haiku is less likely to score its own output generously when a different model is judging.
+Each fixture runs twice. It runs once on the natural track, which is shallow unless the relevance score escalates, and once forced onto the deep track. This produces 20 results across 10 fixtures.
+
+
+4. An example
+Two fixtures from the evaluation show the rubric working at both ends of the scale.
+eval_001 shallow — routine no news (9/9, PASS)
+The context for this fixture was: both teams confirmed at full strength, no injury or suspension news, Brazil in form WWWDW, Croatia in form WDWLW, standard tactical matchup expected.
+The agent produced near-zero values across injury, suspension, and rotation, a modest positive form_delta reflecting Brazil's stronger recent form, and a near-zero tactical_edge. The judge scored 3/3 on factual grounding, 3/3 on magnitude reasonableness, and 3/3 on hallucination presence.
+This is the hallucination trap working as designed. No signal in the brief, no modifier produced, no invented facts. The shallow track on a clear no-news fixture is reliable.
+eval_010 deep — catastrophic home injuries (sign convention trap)
+The context for this fixture was: Netherlands missing Van Dijk (suspended), Depay (injured), and Gakpo (hamstring tear confirmed that morning). The Netherlands coach described it as the worst injury crisis of the tournament. Brazil were fully fit with Vinicius Jr confirmed to start.
+Netherlands is the first-named team. Their crisis should produce negative modifier values, shifting probability away from Netherlands. The agent initially applied positive values, treating the modifiers from Brazil's perspective rather than Netherlands'. All five fields were outside the expected range on the shallow track.
+The fix was rewriting context_injected to make the first-named team perspective explicit, stating "Netherlands are missing three first-team starters" rather than describing the situation from Brazil's viewpoint. After the fix, the deep track scored 7/9, correctly applying negative modifiers from Netherlands' perspective. The shallow track remained marginal at 5/9, showing that the shallow pass gets less context to reason from and is more vulnerable to sign confusion on complex scenarios.
+These two fixtures together show the value of the evaluation. eval_001 confirms the system works correctly on simple cases. eval_010 exposed a structural issue in how the agent frames the first-named team perspective that would not have been visible from production runs alone.
+
+
+5. Results
+The evaluation ran across four prompt iterations to diagnose and fix issues found in earlier runs.
+Best run — 6 PASS, 14 MARGINAL, 0 FAIL
+This run followed the fix to Deep_Search's mock injection. Before this fix, the deep track was bypassing context_override and making real Tavily searches against live match news rather than the controlled context. Once both tracks used the injected context correctly, the results improved significantly.
+The dominant pattern across this run was 2/3 on every criterion across almost all fixtures. The agent was consistently producing values that were directionally correct but not strong enough. This pointed to systematic underconfidence in the modifier prompt rather than a structural failure.
+eval_004 (heavy rotation) and eval_008 (multiple suspensions) both passed on both tracks. eval_005 (both teams full strength) scored 8/9 on both tracks, confirming the hallucination check was working. eval_010 deep passed after the sign convention fix.
+
+
+Fixture
+	Track
+	Scenario
+	FG
+	MR
+	HP
+	Total
+	Verdict
+	Out of Range
+	eval_001
+	shallow
+	routine_no_news
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_001
+	deep
+	routine_no_news
+	2/3
+	2/3
+	1/3
+	5/9
+	MARGINAL
+	form_delta
+	eval_002
+	shallow
+	star_striker_injury_home
+	2/3
+	2/3
+	1/3
+	5/9
+	MARGINAL
+	injury_impact, rest_rotation_impact, form_delta
+	eval_002
+	deep
+	star_striker_injury_home
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	injury_impact
+	eval_003
+	shallow
+	suspension_away_key_defender
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	suspension_impact
+	eval_003
+	deep
+	suspension_away_key_defender
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	suspension_impact
+	eval_004
+	shallow
+	heavy_rotation_home
+	3/3
+	2/3
+	2/3
+	7/9
+	PASS
+	none
+	eval_004
+	deep
+	heavy_rotation_home
+	3/3
+	2/3
+	2/3
+	7/9
+	PASS
+	none
+	eval_005
+	shallow
+	both_teams_full_strength
+	3/3
+	3/3
+	2/3
+	8/9
+	PASS
+	none
+	eval_005
+	deep
+	both_teams_full_strength
+	3/3
+	3/3
+	2/3
+	8/9
+	PASS
+	none
+	eval_006
+	shallow
+	goalkeeper_injury_away
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	rest_rotation_impact
+	eval_006
+	deep
+	goalkeeper_injury_away
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	rest_rotation_impact, tactical_edge
+	eval_007
+	shallow
+	minor_injury_bench_player
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_007
+	deep
+	minor_injury_bench_player
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_008
+	shallow
+	multiple_suspensions_away
+	3/3
+	2/3
+	2/3
+	7/9
+	PASS
+	none
+	eval_008
+	deep
+	multiple_suspensions_away
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_009
+	shallow
+	ambiguous_mixed_signals
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_009
+	deep
+	ambiguous_mixed_signals
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_010
+	shallow
+	catastrophic_home_injuries
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	injury_impact, suspension_impact, rest_rotation_impact, form_delta, tactical_edge
+	eval_010
+	deep
+	catastrophic_home_injuries
+	3/3
+	2/3
+	2/3
+	7/9
+	PASS
+	injury_impact
+	
+
+Summary:  PASS: 6     MARGINAL: 14     FAIL: 0
+
+
+Final run — 4 PASS, 15 MARGINAL, 1 FAIL
+This run introduced three prompt changes: magnitude guidance for injury and suspension fields, an instruction to ground every value strictly in the brief, and explicit instructions for how to write the reasoning field when all values are zero.
+The changes helped on some fixtures and hurt on others. eval_001 shallow scored a perfect 9/9. eval_003 and eval_007 improved. But eval_001 deep failed with a score of 4/9, and eval_005 shallow dropped from PASS to MARGINAL. The prompt changes pushed the agent to be more confident, which helped on fixtures with clear signals but caused hallucination on fixtures with no news.
+The net result was one fewer pass and one new failure compared to the best run.
+
+
+Fixture
+	Track
+	Scenario
+	FG
+	MR
+	HP
+	Total
+	Verdict
+	Out of Range
+	eval_001
+	shallow
+	routine_no_news
+	3/3
+	3/3
+	3/3
+	9/9
+	PASS
+	none
+	eval_001
+	deep
+	routine_no_news
+	1/3
+	2/3
+	1/3
+	4/9
+	FAIL
+	form_delta
+	eval_002
+	shallow
+	star_striker_injury_home
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_002
+	deep
+	star_striker_injury_home
+	2/3
+	2/3
+	1/3
+	5/9
+	MARGINAL
+	none
+	eval_003
+	shallow
+	suspension_away_key_defender
+	3/3
+	2/3
+	2/3
+	7/9
+	PASS
+	none
+	eval_003
+	deep
+	suspension_away_key_defender
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_004
+	shallow
+	heavy_rotation_home
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_004
+	deep
+	heavy_rotation_home
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_005
+	shallow
+	both_teams_full_strength
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_005
+	deep
+	both_teams_full_strength
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_006
+	shallow
+	goalkeeper_injury_away
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	injury_impact, rest_rotation_impact
+	eval_006
+	deep
+	goalkeeper_injury_away
+	2/3
+	2/3
+	1/3
+	5/9
+	MARGINAL
+	injury_impact, rest_rotation_impact
+	eval_007
+	shallow
+	minor_injury_bench_player
+	3/3
+	2/3
+	2/3
+	7/9
+	PASS
+	none
+	eval_007
+	deep
+	minor_injury_bench_player
+	3/3
+	3/3
+	2/3
+	8/9
+	PASS
+	none
+	eval_008
+	shallow
+	multiple_suspensions_away
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_008
+	deep
+	multiple_suspensions_away
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_009
+	shallow
+	ambiguous_mixed_signals
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_009
+	deep
+	ambiguous_mixed_signals
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	eval_010
+	shallow
+	catastrophic_home_injuries
+	2/3
+	1/3
+	2/3
+	5/9
+	MARGINAL
+	none
+	eval_010
+	deep
+	catastrophic_home_injuries
+	2/3
+	2/3
+	2/3
+	6/9
+	MARGINAL
+	none
+	
+
+Summary:  PASS: 4     MARGINAL: 15     FAIL: 1
+
+
+6. Limitations
+The deep track consistently underperforms the shallow track on controlled context. The shallow track produced more passes in every run. The extra Tavily calls and Sonnet synthesis add cost and latency but do not reliably improve the modifier output when the context is controlled. In production with real search results this gap may close, but the evaluation cannot confirm that.
+The agent uses training knowledge to fill gaps. eval_001 deep failed repeatedly because the agent referenced Croatia's 2022 World Cup result from its own memory rather than staying grounded in the brief. Adding a grounding instruction to the prompt reduced but did not eliminate this behaviour. This is a fundamental limitation of using an LLM as a likelihood function. You cannot fully prevent it from reasoning beyond the evidence you provide.
+Magnitude calibration remains unsolved. Almost every fixture scored 2 on magnitude reasonableness across all four runs. Three prompt iterations did not fix this. The agent produces values that are directionally correct but consistently underconfident on strong signals. This is likely a model behaviour pattern rather than a prompt design problem. Recalibrating the weights in collapse_modifiers() against real fixture outcomes rather than mock scenarios may be the more effective path forward.
+
+
+7. Conclusion
+The evaluation confirmed three things the pipeline does well. It produces near-zero modifiers when the brief contains no significant news. It correctly identifies which team benefits from a suspension or rotation when the first-named team perspective is made explicit in the context. It passes cleanly on clear, unambiguous scenarios.
+Three iterations of prompt tuning did not fix magnitude calibration. The agent is directionally correct but consistently underconfident on strong signals. This is the open problem the evaluation leaves behind.
+The best result across all runs was 6 passes, 14 marginals, and 0 fails. The final run produced 4 passes, 15 marginals, and 1 fail. The regression from best to final is itself a finding. Making the prompt more confident helped on fixtures with clear signals and hurt on fixtures with no news. The two goals are in tension, and resolving that tension requires calibrating against real fixture outcomes rather than refining the prompt further.

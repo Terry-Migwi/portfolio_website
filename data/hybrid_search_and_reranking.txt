@@ -1,0 +1,131 @@
+﻿Hybrid Search and Re-ranking
+This article documents how I extended the semantic search engine built over East African business proposals to use hybrid search and cross-encoder re-ranking, what the technique is, how it works, and what it delivered against the same three queries used to expose semantic search's limits.
+1. Scene
+Hybrid search is a retrieval approach that combines two different signals simultaneously: semantic similarity, which captures meaning, and keyword matching, which captures exact terms. The result is a retrieval system that handles both concept queries and specific term queries within a single pipeline, rather than requiring a choice between the two.
+It is used in enterprise search systems where users query both by concept and by specific document identifiers, in legal and compliance platforms where exact clause language matters as much as topical relevance, in e-commerce where a user might search by product description or by a specific model number, and in financial data platforms where exact figures, codes, and named entities are as queryable as general topics.
+I built the hybrid search pipeline as a direct response to the failure documented in the previous article. Semantic search handled concept queries correctly but failed on named entity and specific figure queries, in one case ranking the correct document fifth despite it containing the exact search term verbatim. Hybrid search was the fix, and this article documents what changed, how the technique works, and what the results looked like against the same three queries.
+2. Technique
+Hybrid search works by maintaining two different vector representations for every document chunk, one that captures meaning and one that captures keywords, and combining both at query time to produce a single ranked result.
+Dense vectors
+A dense vector is a fixed-length list of numbers, 384 in this pipeline, where every position carries a value. It is produced by a neural embedding model, in this case all-MiniLM-L6-v2 from HuggingFace, which reads a piece of text and maps it into a position in a high-dimensional space. Chunks with similar meaning land near each other in that space. The dense vector captures what a piece of text is about, independently of the specific words it uses.
+Sparse vectors
+A sparse vector represents a piece of text as a list of term weights, one weight per vocabulary term that actually appears in the text, with everything else set to zero. Most entries are zero, which is why it is called sparse. The weights are not equal, they are computed by BM25, an algorithm that scores each term by how often it appears in this specific chunk relative to how often it appears across the full corpus. A term that appears frequently in one chunk but rarely in others gets a high weight. A term that appears everywhere gets a lower weight because it is less distinctive.
+BM25 is the algorithm behind keyword search in systems like Elasticsearch. It does not understand meaning. It does not know that "financing" and "funding" are related. What it does is reward exact token matches, and reward them more strongly when the matched token is rare and therefore informative.
+In this pipeline, the BM25 encoder is fitted once on the full corpus of 70 chunks before any vectors are stored. The fitted encoder is saved to disk as bm25_encoder.json. Both the ingest pipeline and the query pipeline load the same file, so sparse vectors generated at query time use the same vocabulary and term frequencies as the ones stored in Pinecone. If the encoder were fitted fresh on each query string, the vocabulary would be inconsistent and the sparse scores would be meaningless.
+Combining both with alpha
+At query time, Pinecone receives both a dense vector and a sparse vector for the query, and returns a blended score for each stored chunk using a single parameter called alpha:
+
+
+final_score = alpha x dense_score + (1 - alpha) x sparse_score
+
+
+An alpha of 1.0 produces pure semantic search. An alpha of 0.0 produces pure keyword search. This pipeline uses alpha of 0.75, weighted toward semantic similarity with keyword signal included. The choice reflects the nature of the corpus: business proposal queries are mostly concept-driven, but named entities and specific figures appear often enough to justify the keyword component.
+Cross-encoder re-ranking
+After Pinecone returns the top 15 results, a cross-encoder re-ranks them before the final top 3 are returned to the user.
+Pinecone's hybrid retrieval is a bi-encoder approach. The query is encoded into one vector. Each chunk was pre-encoded into another vector. Similarity is computed between two independent vectors after the fact. The model never sees the query and the chunk together.
+A cross-encoder works differently. It takes the query text and a candidate chunk text and reads both simultaneously as a single input, then produces a relevance score that reflects how well they fit each other directly. This score is more accurate than a similarity score because the model can reason about the relationship between the two texts rather than comparing them as independent points in space.
+The cross-encoder used here is cross-encoder/ms-marco-MiniLM-L-6-v2, trained on Microsoft's MARCO passage ranking dataset. It is small enough to run on CPU and well-suited for passage relevance scoring. The trade-off is latency: unlike dense vectors, cross-encoder scores cannot be pre-computed, so every query scores all 15 retrieved chunks fresh. For a portfolio project at this scale, the latency cost is acceptable.
+The full pipeline in order is: encode the query as both dense and sparse vectors, query Pinecone with both using alpha of 0.75, deduplicate to one chunk per source file, re-rank all unique results with the cross-encoder, return the top 3.
+3. Approach
+I ran the same three queries from the semantic search article against the hybrid pipeline to produce a direct before/after comparison. The table for each query shows the cross-encoder re-rank score and the source file for each result, ordered from highest to lowest score.
+Query 1 — Concept query: solar energy Nairobi informal settlements
+This is the control query. Semantic search handled it correctly, and the expectation for hybrid is that it performs at least as well without regression.
+
+
+Semantic results for reference:
+Score
+	File
+	0.8536
+	solargrid_nairobi.txt
+	0.8530
+	solargrid_nairobi.txt
+	0.8288
+	solargrid_nairobi.txt
+	0.8031
+	solargrid_nairobi.txt
+	0.7572
+	agriboost_microloan.txt
+	
+
+Hybrid results:
+Re-rank score
+	File
+	7.0043
+	solargrid_nairobi.txt
+	-4.4572
+	nairobi_waste_fintech.txt
+	-6.4925
+	uganda_cold_chain.pdf
+	
+
+SolarGrid Nairobi ranked first with a strong positive score. The score gap between position one and position two is 11.4 points, which gives a clear signal about where genuine relevance lies. Hybrid did not regress on the concept query.
+Query 2 — Named entity: NBS Bank Uganda
+Semantic search returned the correct document first but could not separate it from noise, with all five results falling within a score band of 0.73 to 0.83.
+
+
+Semantic results for reference:
+Score
+	File
+	0.8307
+	uganda_cold_chain.pdf
+	0.7654
+	nairobi_fintech_hub.pdf
+	0.7554
+	nairobi_fintech_hub.pdf
+	0.7377
+	nairobi_fintech_hub.pdf
+	0.7357
+	agriboost_microloan.txt
+	
+
+Hybrid results:
+Re-rank score
+	File
+	7.1142
+	uganda_cold_chain.pdf
+	-6.6098
+	nairobi_fintech_hub.pdf
+	-7.8909
+	agriboost_microloan.txt
+	
+
+The correct document ranked first at 7.11 with everything else below -6.60. The sparse vector matched "NBS", "Bank", and "Uganda" as exact tokens against the stored sparse vectors, pulling the one chunk that actually contains that named entity clearly above the rest. The score gap that was invisible in semantic search, 0.09 points between position one and position two, became 13.7 points in hybrid search.
+Query 3 — Specific figure: KES 15,000 per month clearing agent
+This was the clearest failure in semantic search. The correct document ranked fifth despite carrying the highest similarity score in the result set.
+
+
+Semantic results for reference:
+Score
+	File
+	0.7651
+	nairobi_fintech_hub.pdf
+	0.7538
+	agriboost_microloan.txt
+	0.7149
+	nairobi_waste_fintech.txt
+	0.7065
+	rwanda_agri_export.pdf
+	0.7846
+	mombasa_port_logistics.pdf
+	
+
+Hybrid results:
+Re-rank score
+	File
+	8.9006
+	mombasa_port_logistics.pdf
+	-0.6303
+	uganda_cold_chain.pdf
+	-5.3704
+	nairobi_waste_fintech.txt
+	
+
+The correct document moved from fifth to first. The sparse vector matched "KES", "15,000", "clearing", and "agent" as exact tokens, pulling ClearFast's proposal to the top of the Pinecone retrieval before the cross-encoder confirmed it as the most relevant result with a score of 8.90. The document that semantic search could not distinguish from four irrelevant proposals was unambiguous to the hybrid pipeline.
+4. Results
+Here are the findings on the three queries.
+On the concept query, hybrid search matched semantic search's performance exactly. SolarGrid Nairobi ranked first in both pipelines, and the cross-encoder introduced a clear score gap between the correct result and the rest that the cosine similarity scores did not provide. Hybrid search did not regress on the scenario where semantic search already worked.
+On the named entity query, hybrid search preserved the correct top result from semantic search and widened the margin between it and the irrelevant results from 0.09 points to 13.7 points. The compressed score band that made semantic search's result untrustworthy became a clear separation. The sparse vector's exact token matching on "NBS Bank Uganda" was the mechanism that produced this separation.
+On the specific figure query, hybrid search corrected semantic search's most significant failure. The correct document moved from fifth to first. This is the result the technique was introduced to produce, and the before/after comparison makes the improvement directly visible.
+One honest gap: on broad categorical queries, cross-encoder scores compress toward each other and ranking becomes less reliable. A query such as "which proposals address food security" returned AgriBoost Kenya as the second result at -9.511, marginally below CleanChain at -9.498, despite AgriBoost being the only directly relevant proposal. A score difference of 0.013 is effectively a tie. The RAG layer handles this by passing full proposal text to Claude rather than relying on chunk ordering alone, which is documented in the next article.
+5. Key Takeaway
+Hybrid search is the correct retrieval approach when a corpus receives both concept queries and exact term queries. Dense vectors handle the first case and sparse vectors handle the second, with alpha controlling the blend between them. Re-ranking with a cross-encoder adds a second pass that the bi-encoder retriever cannot provide, reading query and chunk together rather than comparing them as independent vectors. The three queries in this article show the combination working as intended: no regression on concept queries, clear improvement on named entity queries, and direct correction of the specific figure failure that semantic search could not resolve.

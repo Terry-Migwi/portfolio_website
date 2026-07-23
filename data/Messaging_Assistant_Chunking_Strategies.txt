@@ -1,0 +1,51 @@
+﻿Chunking Strategies: Splitting Denta's FAQ Document Three Ways
+This article documents three chunking strategies tried against Denta's clinic FAQ document, what broke or worked in each, and what that reveals about matching a chunking strategy to a document's actual structure rather than picking one by default.
+1. Scene
+Chunking is the step in a RAG pipeline where a document gets split into smaller pieces before those pieces are embedded and stored for retrieval. A whole document is usually too large, and too topically mixed, to embed as a single meaningful vector, so it has to be broken down first, and how it gets broken down is its own decision, separate from everything else in the pipeline. The RAG article in this series deferred that decision on purpose, this article picks it up directly, using Denta's clinic FAQ document as the test case.
+2. Problem
+Retrieval only works if a chunk actually contains the information a question is asking about, in a form that makes sense on its own once pulled out of the document. A chunk boundary that falls in the wrong place can separate a question from its answer, or a service name from its price, and no amount of clever retrieval logic afterward can put that context back together once it's already been split apart. Chunking has to happen before search ever runs, which means a bad chunking decision is invisible until a real question exposes it, the retriever will confidently return a chunk, it just won't contain what's actually needed.
+3. Approach
+Strategy 1: Fixed-size chunking with overlap
+Fixed-size chunking splits a document into pieces of a set character length, with a smaller overlapping section between consecutive chunks so that content near a boundary isn't completely lost from one chunk to the next. It has no awareness of the document's actual structure, tables, headings, question-and-answer pairs, it only counts characters. Applied here, the document was split into 500-character chunks with a 50-character overlap.
+The failure mode shows up immediately in the pricing table. Chunk 2 ends mid-row:
+| Dental Braces (both jaws)        | Ksh 150,000                                      |
+| De
+	Chunk 3 picks up mid-word on the next line:
+50,000                                      |
+| Dental Implant                   | Ksh 100,000 (implant) + Ksh 50,000 (crown)       |
+	The service name "Dental Implant" and its price landed in different chunks, and the row directly above it, whatever service costs 50,000, lost its label entirely in chunk 2. A retriever pulling chunk 2 alone for a pricing question would return a price with no service name attached to it. The same thing happens in the prose sections, chunk 0 ends on "Park Suite Buildi", chunk 1 has to pick up "ng), Parklands, Nairobi" to complete a single word. Fixed-size chunking doesn't know a table row, a sentence, or a word is a unit that shouldn't be broken, it only knows character counts.
+Strategy 2: Section-based semantic chunking
+Section-based chunking splits a document on its own structural markers instead of a fixed character count, in this case, the document's section headers and its Q: prefixes, so a chunk boundary only ever falls where the document itself already has a natural break. This is close to the separator configuration used in ingest_pinecone.py, though tested here without a hard size cap, to isolate what section-based splitting alone produces.
+The pricing table survives completely intact as one chunk, every row, every price, in order, nothing severed mid-line. That's the direct fix for Strategy 1's failure. But a new problem appears in the FAQ section. Because every FAQ question shares the same section, from "What is the cost of dental braces?" through "Where is the clinic located?", they all land in one single chunk together, seventeen separate questions and answers as one undivided block of text.
+--- Chunk 4 | Section: --- FREQUENTLY ASKED QUESTIONS (FAQs) --- ---
+--- FREQUENTLY ASKED QUESTIONS (FAQs) ---
+Q: What is the cost of dental braces?
+A: The cost of dental braces at the clinic is Ksh 75,000 per jaw and Ksh 150,000
+for both jaws. A flexible payment plan is available — patients can pay 50%
+upfront and the remaining 50% over the course of treatment.
+ 
+Q: What is the cost of dental implants?
+A: Dental implants cost Ksh 100,000 for the implant and Ksh 50,000 for the
+crown. If a bone graft is required, there is an additional cost of Ksh 50,000
+– Ksh 100,000 per tooth. A 50/50 flexible payment plan is available.
+ 
+Q: What is the cost of root canal treatment?
+A: Root canal treatment costs between Ksh 20,000 and Ksh 22,000 per tooth.
+ 
+[...fourteen more questions and answers continue in this same chunk...]
+	This is a failure of granularity. A patient asking specifically about teeth cleaning would have that retrieved chunk also carry root canal pricing, implant pricing, X-ray pricing, insurance policy, and clinic location, all bundled into the same piece of retrieved context. The embedding for that chunk represents the average meaning of seventeen different questions at once, diluted rather than specific to any one of them.
+Strategy 3: Atomic, FAQ-level chunking
+Atomic chunking splits a document at the level of individual meaning rather than structural section; each self-contained unit of information becomes its own chunk, regardless of which larger section it originally belonged to. Applied here, each FAQ question and its answer became its own chunk, while each non-FAQ section, clinic info, services list, pricing table, payment plans, kept its own single chunk. The seventeen-question FAQ block from Strategy 2 became seventeen separate chunks.
+--- Chunk 6 | Type: faq ---
+Q: What is the cost of teeth cleaning?
+A: A teeth cleaning session costs Ksh 7,500.
+	A patient asking about teeth cleaning now retrieves exactly this, and only this, with nothing else attached. Each chunk also carries a Type label, faq, pricing_table, clinic_info, payment_plans, and metadata that isn't used by the retriever yet, but that could support filtered retrieval later, searching only within FAQ-type chunks for a question, for instance.
+The trade-off here is more chunks to embed and store, seventeen small chunks instead of one section chunk, and a small amount of duplication; the teeth cleaning price appears both in its own FAQ chunk and inside the full pricing table chunk. For a document this size, that cost is negligible. For a much larger document, it would need to be weighed more seriously.
+4. Results
+Running the same question, "what is the cost of teeth cleaning," against what each strategy would actually return with a k=2 retriever:
+Strategy 1 risks returning a chunk with a truncated price row, a number with no service name, or a service name with no price, depending on exactly where the 500-character boundary happened to land relative to that specific row.
+Strategy 2 reliably returns the correct information, but bundled with sixteen other questions' worth of irrelevant content in the same chunk, wasting context window space and diluting the chunk's embedding away from being specifically about teeth cleaning.
+Strategy 3 reliably returns exactly the one relevant question and answer, cleanly, with nothing extraneous riding along.
+Fixed-size chunking failed because it ignored the structure entirely. Section-based chunking respected structure but chose too coarse a unit for a document that is actually a list of independent facts. Atomic chunking worked because it marked the chunk boundary to the same boundary a real question would draw, one question, one answer, as one chunk.
+5. Key Takeaway
+Chunking strategy is a decision that has to be made for every document. For a document built almost entirely out of independent question-and-answer pairs, such as what we have here, atomic chunking is the clear structural fit. However, that won't hold true for every document. A document built from long-form narrative sections, like a legal contract or a technical manual, might have the opposite problem under atomic-style splitting, breaking a single coherent explanation into fragments too small to make sense on their own. The right granularity depends on whether a document's natural units of meaning are small and independent, like FAQ pairs, or larger and interdependent, like prose sections that build on each other.

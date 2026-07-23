@@ -1,0 +1,103 @@
+﻿LangChain Document Loaders
+This article documents how I used LangChain document loaders to ingest a mixed corpus of text and PDF business proposals into a vector store, what document loaders are, how they are built, and where the abstraction reached its limit in this pipeline.
+1. Scene
+Every RAG pipeline starts with getting raw documents into a form the rest of the system can work with. A document on disk is a file. A retrieval pipeline needs text, split into chunks, converted into vectors, and stored in a vector database. The gap between those two states involves reading files, handling different formats, extracting clean text, and attaching metadata that survives into retrieval. LangChain document loaders handle that gap.
+A document loader in LangChain is a class that reads a file or data source and returns a list of Document objects. A Document is LangChain's standard unit for text content moving through a pipeline. It carries two things: page_content, which is the extracted text, and metadata, which is a dictionary of any additional information attached to that text, such as the filename it came from, the page number it was extracted from, or the URL it was fetched from.
+Document loaders exist for a wide range of sources: local files in formats including plain text, PDF, Word, CSV, and HTML; web sources including web pages, YouTube transcripts, and Notion databases; and data platforms including Google Drive, Confluence, and S3. The abstraction is consistent across all of them. Regardless of source or format, every loader produces the same output shape: a list of Document objects ready for the next stage of the pipeline.
+I used document loaders as the entry point for ingesting twelve East African business proposals into Pinecone, covering a mix of plain text and PDF files. This article documents how that worked, where I extended the abstraction, and where I stepped around it entirely.
+2. Problem
+A RAG pipeline that only handles one file format is brittle. The twelve proposals in this corpus arrived in two formats: eight as plain text files and four as PDFs. A loader that only reads text files would miss the PDFs. A loader that only reads PDFs would miss the text files. The ingest pipeline needed to handle both formats cleanly, extract text correctly from each, and attach consistent metadata so that retrieval could identify which proposal any given chunk came from.
+PDF extraction adds a specific difficulty that plain text does not have. A plain text file is already text. A PDF is a rendered document where text, layout, and formatting are interleaved. Extracting clean, readable text from a PDF requires a library that can parse that structure and return the text content in reading order, without carrying over layout artifacts, header and footer noise, or encoding issues that would corrupt the extracted content before it reaches the embedding model.
+The metadata problem applies to both formats. LangChain's TextLoader attaches the file path to the source field in metadata by default, but does not attach the filename as a separate field. The retrieval pipeline uses filename to deduplicate results by source document, so a consistent filename field needed to be present on every Document object regardless of which loader produced it.
+3. Approach
+The ingest pipeline processed two file types through two different loading strategies, unified by a single load_documents() function that returned a consistent list of Document objects regardless of format.
+Plain text files with TextLoader
+LangChain's TextLoader reads a plain text file and returns it as a single Document. It takes a file path and an encoding, and handles the file read directly.
+
+
+from langchain_community.document_loaders import TextLoader
+
+
+loader = TextLoader(str(filepath), encoding="utf-8")
+loaded = loader.load()
+for doc in loaded:
+    doc.metadata["filename"] = filepath.name
+
+
+TextLoader attaches the full file path to doc.metadata["source"] by default. The filename field is not added automatically, so it is added manually after loading. Every text document in the corpus went through this path: one file, one Document, one filename in metadata.
+PDF files with pdfplumber
+LangChain has a built-in PyPDFLoader for PDF ingestion, but this pipeline uses pdfplumber directly instead. The reason is extraction quality. PyPDFLoader uses pypdf under the hood, which can struggle with certain PDF layouts, producing garbled text or merging content from adjacent columns. pdfplumber gives more reliable text extraction for document-style PDFs, with page-by-page access and clean line handling.
+Because pdfplumber is not a LangChain loader, the output has to be wrapped manually into a Document object to match the shape that the rest of the pipeline expects:
+
+
+import pdfplumber
+from langchain_core.documents import Document
+
+
+with pdfplumber.open(str(filepath)) as pdf:
+    text = ""
+    for page in pdf.pages:
+        text += page.extract_text() or ""
+
+
+doc = Document(
+    page_content=text,
+    metadata={"filename": filepath.name, "source": str(filepath)}
+)
+
+
+Each PDF is read page by page, with the text concatenated into a single string. The or "" guard handles pages that return None from extract_text(), which can happen on pages that contain only images or embedded objects with no extractable text layer. The resulting Document matches the shape produced by TextLoader exactly: page_content holds the full text, and metadata holds both filename and source.
+Unified loading function
+Both paths feed into a single load_documents() function that iterates over the proposals directory and dispatches each file to the correct loader based on its extension:
+
+
+def load_documents(data_dir: Path) -> list[Document]:
+    docs = []
+    for filepath in sorted(data_dir.iterdir()):
+        if filepath.suffix == ".txt":
+            loader = TextLoader(str(filepath), encoding="utf-8")
+            loaded = loader.load()
+            for doc in loaded:
+                doc.metadata["filename"] = filepath.name
+            docs.extend(loaded)
+        elif filepath.suffix == ".pdf":
+            with pdfplumber.open(str(filepath)) as pdf:
+                text = ""
+                for page in pdf.pages:
+                    text += page.extract_text() or ""
+            doc = Document(
+                page_content=text,
+                metadata={"filename": filepath.name, "source": str(filepath)}
+            )
+            docs.append(doc)
+    return docs
+
+
+The function returns a flat list of Document objects. The calling code does not need to know which loader produced which document. Every item in the list has page_content and a filename in metadata, and the chunking step that follows treats them all identically.
+Where the abstraction ended
+LangChain's PineconeVectorStore.from_documents() is the standard abstraction for embedding and storing a list of Document objects in Pinecone. It handles embedding and upsert in a single call and is straightforward for pure semantic search pipelines.
+Hybrid search requires sparse vectors to be stored alongside dense vectors in the Pinecone upsert payload. PineconeVectorStore.from_documents() does not expose sparse vector upload. The abstraction ends at the point where the ingest payload needs to carry two vector types.
+The fix was to step around PineconeVectorStore for the upsert step and call the Pinecone client directly, building each vector payload manually with both values for the dense vector and sparse_values for the BM25 sparse vector, alongside the chunk text and filename in metadata:
+
+
+vectors.append({
+    "id": str(uuid.uuid4()),
+    "values": dense_vectors[i],
+    "sparse_values": sparse_vectors[i],
+    "metadata": {
+        "text": chunk.page_content,
+        "filename": chunk.metadata.get("filename", "unknown"),
+        "source": chunk.metadata.get("source", ""),
+    }
+})
+index.upsert(vectors=batch, namespace=NAMESPACE)
+
+
+The document loading and chunking stages remained on LangChain abstractions throughout. The upsert stage did not. Knowing where an abstraction ends and where to step around it is part of working with any framework, and this pipeline hit that boundary directly.
+4. Results
+The load_documents() function processed all twelve proposals cleanly across both file formats. Eight plain text files loaded through TextLoader and four PDFs loaded through pdfplumber, all returning Document objects with consistent page_content and filename metadata.
+The text splitter received a flat list of twelve documents and produced 70 chunks. Every chunk carried the filename of its source document in metadata, which the deduplication step in the retrieval pipeline used to enforce one result per source file. Without that metadata surviving from loading through chunking into Pinecone, deduplication would have had no basis for grouping chunks by origin.
+The choice to use pdfplumber over PyPDFLoader was validated by the extraction output. The four PDF proposals, covering port logistics, cold chain Uganda, the Nairobi fintech hub, and Rwanda agricultural exports, all produced clean, readable text with no layout artifacts or encoding errors in the extracted content. The retrieval results for those documents were accurate, which would not have been the case if the extracted text had been corrupted before embedding.
+The hybrid ingest required stepping outside the LangChain abstraction at the upsert stage. That decision added complexity to ingest.py but kept the rest of the pipeline, document loading, chunking, and retrieval, on familiar LangChain patterns. The boundary between where the abstraction helped and where it did not was clear, and drawing that line explicitly is a more useful outcome than either staying inside the abstraction at the cost of functionality or abandoning it entirely.
+5. Key Takeaway
+LangChain document loaders solve the format problem at the entry point of a RAG pipeline. They provide a consistent output shape regardless of input format, which means the chunking, embedding, and storage steps that follow do not need to know anything about how the text was originally read. The abstraction holds well for standard ingestion pipelines. When the storage step requires something the abstraction does not expose, such as sparse vectors for hybrid search, the right response is to step around the specific part that does not fit while keeping the rest of the pipeline on the abstraction. Abandoning the abstraction entirely because one step does not fit would discard the parts that do.

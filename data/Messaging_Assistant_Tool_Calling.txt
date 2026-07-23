@@ -1,0 +1,60 @@
+﻿Tool Calling: How a Messaging Assistant Books Appointments on Google Calendar
+This article is part of a series on building a RAG powered WhatsApp messaging assistant. The example throughout uses a dental clinic's data, but the pattern applies to any business that answers FAQs and takes bookings over a messaging channel.
+1. Scene
+A messaging assistant for a small business has two jobs. The first job is answering questions. A patient texts asking about pricing, opening hours, or what a root canal costs, and the assistant retrieves the right information from the business's own documents and answers in plain language. The second job is taking action. A patient wants an appointment. Answering a question and taking an action are different problems, even though both arrive as the same kind of WhatsApp message. The first is retrieval. The second requires the assistant to reach into a real system, check a real calendar, and create a real event.
+2. What This Article Covers
+This article covers how the messaging assistant uses LangChain tools to give its LLM controlled access to Google Calendar. It walks through what a LangChain tool actually is, how tool calling works step by step, why this problem exists for any LLM and not just the one used here, how the calendar integration was built for this specific assistant, what booking through the assistant actually changes for a patient and a clinic, and where the current error handling still falls short.
+3. What Is a LangChain Tool
+A LangChain tool is a normal Python function wrapped in a way that lets an LLM decide to call it. The LLM cannot run Python. It can only read text and generate text. A tool bridges that gap by describing a function to the model as a name, a plain language description of when to use it, and a schema of the arguments it expects. The model reads that description alongside the conversation, decides whether the function is relevant, and if it is, produces the arguments needed to call it. The actual function still runs in your own code, not inside the model. The model's only job is deciding when to call it and with what.
+4. How to Call Tools Using LangChain
+Calling a tool follows the same five steps regardless of what the tool does.
+1. Write a plain Python function that does the real work. For this assistant, that function lives in calendar_service.py and talks directly to the Google Calendar API through OAuth2 credentials. This function knows nothing about LangChain or the LLM. It just checks a calendar or writes to one.
+2. Wrap that function with LangChain's @tool decorator. The decorator turns the function into an object the LLM can be told about. It reads the function's type hints to build a schema of the arguments and reads the function's docstring to build the description the model will read.
+3. Give the model the list of available tools when you call it. The model sees every tool's name, description, and schema at the same time and decides for itself whether any of them apply to the current message.
+4. Read the model's response. If the model decides a tool applies, the API response contains a tool use block instead of plain text. That block names the tool and supplies the arguments as structured data, for example a date field, rather than as a sentence.
+5. Run the real function with those arguments and send the result back to the model. The model then writes the actual reply to the patient using that result. The patient never sees a function name or structured data. They see a plain answer, such as confirmation that a time is available.
+Here is the tool definition from booking_tools.py that step two produces:
+@tool
+def check_available_slots(date: str) -> str:
+    """
+    Check available 30-minute appointment slots at the clinic
+    for a given date.
+ 
+    Use this when a patient asks what times are free, or before
+    confirming a booking to verify a preferred slot is still open.
+ 
+    Args:
+        date: The date to check in YYYY-MM-DD format.
+    """
+
+
+5. The Problem
+This is not a Claude-specific limitation. Every large language model, regardless of provider, is fundamentally a text generator. It has no hands. It cannot query a database, cannot write to a calendar, and cannot confirm that a time slot is actually free. If a messaging assistant asked an LLM directly whether a specific time is available, the model would either refuse to guess or, worse, generate a plausible sounding but fabricated answer. For a customer support chatbot, a wrong FAQ answer is an inconvenience. For a booking assistant, a fabricated appointment slot is a broken promise to a real patient and a real double booking risk for the clinic.
+The problem, stated generally, is this. An LLM needs a controlled way to trigger real world actions and receive real world data back, without the model itself being allowed to run arbitrary code or touch a system directly. Tool calling is the general answer to that problem, and it exists in some form across every major LLM provider's API, not just Anthropic's.
+6. The Approach
+The messaging assistant solves this with two layers that are kept deliberately separate.
+The first layer, calendar_service.py, is pure Python with no LangChain or LLM involvement. It defines get_available_slots and create_appointment, both of which talk directly to the Google Calendar API. This layer was built and tested on its own first, called from a simple test script, with results checked manually against a real Google Calendar. Testing this layer in isolation meant that any bug appearing later would have to live in the layer above it, not here.
+The second layer, booking_tools.py, wraps those functions with the @tool decorator, following the five steps described above. This layer is the only part of the system that speaks LangChain's language. Above it sits the booking agent, which decides when a patient's message calls for checking availability versus confirming a booking versus cancelling one, and calls the matching tool accordingly.
+One detail worth stating plainly. The patient's phone number is never something the model has to ask for or extract from the conversation. It arrives automatically with the incoming message and is injected directly into the tool call. Earlier versions of the assistant had the model ask the patient for their number mid conversation, which was an unnecessary step over a channel where the number is already known. Removing it removed one more thing the model could get wrong.
+7. Results
+I want to be precise about what results means here. This assistant has not run in production for a real clinic with real patient volume, so I cannot report measured outcomes such as hours saved or bookings completed. What I can report is what the architecture achieves by design, and what changes structurally once booking runs through the assistant instead of a phone call.
+Without Tool Calling
+	With Tool Calling
+	A staff member checks the calendar manually and replies to each patient by phone
+	The assistant checks real availability instantly and replies within the same message thread
+	Booking is only possible during clinic opening hours
+	A patient can check slots and book outside opening hours, and the appointment is confirmed the moment the calendar accepts it
+	Every booking requires a human in the loop
+	Routine bookings require no human involvement unless something goes wrong
+	A double booking is caught only when someone notices it in the calendar
+	A double booking is prevented at the point of booking, because the tool checks real time availability before confirming
+	
+
+The structural benefit is real even without production numbers behind it. A patient gets an immediate, accurate answer instead of being told someone will call them back. A clinic gets a booking that is already reflected in its actual calendar rather than a note that still needs manual entry. I would treat the table above as the argument for why this pattern is worth building, not as evidence of what it has already delivered at scale.
+8. Limitations
+The most important limitation to state clearly is error handling at the tool calling level itself. Error handling in this system currently exists in two places, and neither is designed specifically around the model producing a bad tool call.
+* calendar_service.py catches errors coming back from the Google Calendar API itself, for example a failed write, and returns an empty result rather than letting the exception crash the request.
+* main.py wraps the entire message handling path in a broad exception handler, so if anything fails anywhere in the pipeline, including inside a tool call, the patient receives a generic fallback message instead of no reply at all.
+
+
+What does not exist yet is validation of the model's tool call arguments before they are executed. If the model were to produce a malformed date, an ambiguous time, or a call that does not match the schema cleanly, there is no dedicated step that catches this, explains the problem back to the model, and asks it to correct the call before trying again. Today, that kind of failure most likely surfaces as a raw exception inside calendar_service.py and falls through to the same generic fallback message a patient would see for any other failure. That is a genuine gap, not a designed safeguard, and it is the first place I would add a validation and retry step if this assistant needed to handle real, unpredictable patient input at scale.

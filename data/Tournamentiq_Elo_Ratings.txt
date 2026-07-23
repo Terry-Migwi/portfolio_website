@@ -1,0 +1,424 @@
+﻿TournamentIQ – Elo Ratings and Football Intelligence
+A data-driven look at team strength during the 2026 FIFA World Cup
+1. Introduction
+TournamentIQ is an intelligent system that tracks team strength using live 2026 FIFA World Cup data. This article discusses how I used elo ratings to answer one question: who is the strongest team in this tournament, based purely on what has happened on the pitch?
+2. What is Elo
+To answer that question, this system uses Elo ratings.
+Elo is a mathematical system for measuring the strength of a competitor based on their results against other competitors. It was originally designed for chess but maps well to football and is used across several professional sports analytics systems.
+The key difference between Elo and a standard league table is what each one measures. A league table tells you what happened. Elo tells you how good a team actually is, accounting for who they beat and by how much. A team can top their group by beating three weak opponents and still have a low Elo. A team that loses narrowly to the tournament favourite might have a higher Elo than their standing suggests.
+3. The limitation of Elo from a World Cup Perspective
+World Football Elo ratings date back to 1997. Those ratings reflect decades of international results and are useful for ranking teams across world football. But they carry historical points into a tournament that were built long before it started. Historical data cannot answer a different question: which teams have been exceptionally good in this specific tournament, regardless of what came before. TournamentIQ answers that question. Every team starts at the same baseline with no prior history. The ratings are built entirely from what happens in 2026.
+4. Calculating Elo Ratings
+Expected outcome
+Before each match, the system calculates the probability that each team will win. This is called the expected score.
+E(A) = 1 / (1 + 10 ^ ((R(B) - R(A)) / 400))
+
+
+
+
+
+
+Where:
+* E(A) is the expected score for Team A
+* R(A) is Team A's current rating
+* R(B) is Team B's current rating
+* 400 is a scaling constant that controls the steepness of the probability curve
+
+
+The 400 constant was standardised in chess and inherited by most Elo systems. It controls how steep the probability curve is between two teams. Here is what different rating gaps produce:
+
+
+* A 400-point gap:
+E(A) = 1 / (1 + 10 ^ (-400/400))
+     = 1 / (1 + 10 ^ (-1))
+     = 1 / (1 + 0.1)
+     = 1 / 1.1 = 0.909
+The stronger team wins 91% of the time.
+
+
+* A 200-point gap:
+E(A) = 1 / (1 + 10 ^ (-200/400))
+     = 1 / (1 + 10 ^ (-0.5))
+     = 1 / (1 + 0.316)
+     = 1 / 1.316 = 0.760
+The stronger team wins 76% of the time.
+
+
+Equal ratings give exactly 50%. The wider the gap, the more certain the outcome.
+New rating
+The new Elo rating is calculated after every match based on what actually happened versus what was expected.
+New Rating = Old Rating + K x G x (W - E(A))
+Where:
+* W is the actual result. Win = 1.0, draw = 0.5, loss = 0.0
+* Penalty shootout winner: W = 0.75
+* Penalty shootout loser: W = 0.5
+
+
+K is the sensitivity factor — how much a single match can move the rating. It increases in later rounds because higher-stakes matches carry more weight.
+* Group stage: K = 32
+* Last 32: K = 40
+* Round of 16 and Quarterfinals: K = 50
+* Semifinals, Final, and 3rd place: K = 60
+
+
+G is the goal difference multiplier. Bigger wins earn a larger multiplier, so the system rewards dominance rather than just results.
+* Win by 0 or 1 goals: G = 1.0
+* Win by 2 goals: G = 1.5
+* Win by 3 or more goals: G = 1.75
+* Penalty shootout: G = 1.0 (penalties are not a measure of dominance)
+
+
+Zero-sum property: what one team gains, the other loses exactly. Total ratings across all teams stay constant.
+
+
+5. A worked example: Germany vs Curacao (Group Stage One 2026 World Cup)
+Germany beat Curacao 7-1 in the group stage of the 2026 World Cup. Both teams were playing their first match of the tournament, so both started at the baseline rating of 1000. Here is how the new rating is calculated.
+
+
+Step 1 — Expected score
+E(Germany) = 1 / (1 + 10 ^ ((1000 - 1000) / 400))
+           = 1 / (1 + 10 ^ 0) = 1 / 2 = 0.5
+Because both teams start at 1000, the system treats this as a 50/50 match. It has no prior information about either team.
+
+
+Step 2 — New rating
+K = 32 (group stage). G = 1.75 (winning by 6 goals triggers the 3+ multiplier). W = 1.0 (Germany won in regular time).
+New Rating = 1000 + 32 x 1.75 x (1.0 - 0.5)
+           = 1000 + 32 x 1.75 x 0.5
+           = 1000 + 28 = 1028
+Germany ends the match at 1028. Curacao drops to 972, because what Germany gained, Curacao lost exactly.
+
+
+6. How does this compare to World Football Elo Ratings?
+World Football Elo has Germany at 1939 and Curacao at 1436 after this match. TornamentIQ has Germany at 1028 and Curacao at 972. The difference comes from where both teams started before the match.
+In World Football Elo, Germany entered with a rating of 1938 and Curacao with 1440, a gap of 498 points. Plug that into the expected score formula:
+E(Germany) = 1 / (1 + 10 ^ (-498/400)) = 0.947
+Germany was already expected to win 94.7% of the time. So even with a 7-1 result, the surprise factor was tiny.
+Surprise factor = W - E(A) = 1.0 - 0.947 = 0.053
+According to the World Football ratings awarding system, Germany gained 1 point. Curacao lost 4. The result was almost entirely expected, so the ratings barely moved. In TournamentIQ, both teams started at 1000, so the surprise factor was 0.5, and both teams moved by 28 points. 
+This disparity reflects what each system is measuring. World Football Elo brings decades of international data while TournamentIQ starts fresh at the tournament and builds from what happens on the pitch.
+
+
+7. Backtesting on the 2022 World Cup
+To validate TournamentIQ before using it on live 2026 data, I ran it through all 64 matches of the 2022 Qatar World Cup. Every team starts at 1000. Ratings shift after each match based on result, scoreline, and stage. By match 64, the ratings reflect the full tournament.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+TournamentIQ vs World Football Elo — 2022 final rankings
+
+
+#
+	TournamentIQ
+	Rating
+	World Football
+	Rating
+	Rank shift
+	1
+	France
+	1142
+	Argentina
+	2144
+	2 places
+	2
+	Argentina
+	1120
+	Brazil
+	2133
+	2 places
+	3
+	Netherlands
+	1076
+	France
+	2082
+	2 places
+	4
+	Brazil
+	1073
+	Netherlands
+	2073
+	Same
+	5
+	England
+	1063
+	Portugal
+	1998
+	1 place
+	6
+	Portugal
+	1037
+	Spain
+	1996
+	2 places
+	7
+	Croatia
+	1024
+	England
+	1966
+	2 places
+	8
+	Spain
+	1023
+	Germany
+	1955
+	2 places
+	9
+	Japan
+	1016
+	Croatia
+	1950
+	2 places
+	10
+	Germany
+	1010
+	Belgium
+	1947
+	Same
+	
+
+Table 2: Side-by-side comparison of final 2022 World Cup rankings between my tournament-only system and World Football Elo. Rank shift shows how many places each team moved between the two systems.
+
+
+8. What is similar and what is different?
+
+
+Comparing these results to the world football data, all eight quarterfinalists ended up in the top eight. TournamentIQ correctly separated the strong teams from the weak ones across the tournament. The most interesting finding from TournamentIQ is France at number one. While Argentina won the FIFA World Cup 2022, France ranks higher than Argentina in the system. 
+Why France ranks higher in TournamentIQ
+France scored 16 goals across 7 matches. The goal multiplier applied at 1.75 in two matches and 1.5 in three others, meaning the system rewarded them for winning by a margin, not just winning. That is dominance. Their only loss came against Tunisia in the group stage, which cost them 18.7 points. From the Round of 16 onward, they did not lose a single match in regular time. Their biggest single gain came in the semifinal against Morocco, where a 2-0 win with K = 60 added 42 points in one match. In the Final, they came back from 2-0 down to draw 3-3, and despite losing on penalties, the system gave them W = 0.75 rather than 0, adding another 14.2 points. They ended the tournament at 1142.
+
+
+The table below shows France's rating after every match, including the exact formula inputs that produced each shift.
+
+
+Match
+	Score
+	Result
+	K
+	G
+	Before
+	Change
+	After
+	vs Australia  |  Group stage
+	4 - 1
+	Win
+	32
+	1.75
+	1000
+	+28.0
+	1028
+	vs Denmark  |  Group stage
+	2 - 1
+	Win
+	32
+	1.0
+	1028
+	+14.7
+	1043
+	vs Tunisia  |  Group stage
+	0 - 1
+	Loss
+	32
+	1.0
+	1043
+	-18.7
+	1024
+	vs Poland  |  Round of 16
+	3 - 1
+	Win
+	50
+	1.5
+	1024
+	+34.9
+	1059
+	vs England  |  Quarterfinal
+	2 - 1
+	Win
+	50
+	1.0
+	1059
+	+27.2
+	1086
+	vs Morocco  |  Semifinal
+	2 - 0
+	Win
+	60
+	1.5
+	1086
+	+42.0
+	1128
+	vs Argentina  |  Final (lost on pens)
+	3 - 3
+	Pens loss
+	60
+	1.0
+	1128
+	+14.2
+	1142
+	
+
+Table 3: France match-by-match Elo ratings across the 2022 World Cup. K is the stage multiplier, and G is the goal margin multiplier. Before and After show the rating before and after each match. 
+Argentina won the FIFA World Cup 2026, but why didn’t they top TournamentIQ? 
+Argentina scored 15 goals across 7 matches. The goal multiplier applied at 1.5 in three matches and 1.75 in one, but the story of their tournament is not dominance but recovery. Argentina started the tournament with a loss to Saudi Arabia, which cost them 16 points and left them at 984, below their starting baseline. They recovered through the group stage, picking up 25.1 points in each of their next two wins against Mexico and Poland, both finishing 2-0 and earning the 1.5 goal multiplier. From the Round of 16 onward, they won every match. The quarterfinal against the Netherlands went to penalties and earned them 14 points, a modest gain because the system treats penalty wins as uncertain outcomes. Their best single match came in the semifinal against Croatia, a 3-0 win with K = 60 that brought in 47.6 points, the highest single-match gain of either team across the whole tournament. In the Final, they won on penalties against France but gained only 0.8 points, because both teams went in rated almost equally and a penalty win against a near-equal opponent moves the rating very little. They ended at 1120.
+
+
+
+
+
+
+The table below shows Argentina's match-by-match journey, including the semifinal against Croatia which produced the single highest rating gain of either team across the entire tournament.
+
+
+Match
+	Score
+	Result
+	K
+	G
+	Before
+	Change
+	After
+	vs Saudi Arabia  |  Group stage
+	1 - 2
+	Loss
+	32
+	1.0
+	1000
+	-16.0
+	984
+	vs Mexico  |  Group stage
+	2 - 0
+	Win
+	32
+	1.5
+	984
+	+25.1
+	1009
+	vs Poland  |  Group stage
+	2 - 0
+	Win
+	32
+	1.5
+	1009
+	+25.1
+	1034
+	vs Australia  |  Round of 16
+	2 - 1
+	Win
+	50
+	1.0
+	1034
+	+22.9
+	1057
+	vs Netherlands  |  QF (pens)
+	2 - 2
+	Pens win
+	50
+	1.0
+	1057
+	+14.0
+	1071
+	vs Croatia  |  Semifinal
+	3 - 0
+	Win
+	60
+	1.75
+	1071
+	+47.6
+	1119
+	vs France  |  Final (won on pens)
+	3 - 3
+	Pens win
+	60
+	1.0
+	1119
+	+0.8
+	1120
+	
+
+Table 4: Argentina match-by-match Elo ratings across the 2022 World Cup. The semifinal gain of +47.6 against Croatia was the largest single-match gain of any team in the tournament.
+
+
+Why are FIFA World Cup 2026 results different from TournamentIQ? 
+Using Elo Ratings history, Argentina arrived at the 2022 World Cup with 2143 points while France arrived with 2004 points, a gap of 139 points before a single match was played. France produced more dominant score lines across the tournament and earned higher goal multipliers, but they were closing a gap built up over years of international football, not just these seven matches.
+Two teams in the comparison table make this point clearly. Belgium appears in the World Football top 10 but not in TournamentIQ. They carried a strong pre-tournament rating built over years of results but went out in the group stage. TournamentIQ saw none of that history so ranked them accordingly. Japan is the opposite. They appear in my top 10 but not in World Football's. They beat Germany and Spain in the group stage, two of the biggest upsets of the tournament. TournamentIQ rewarded that fully because it had no prior history pulling their rating down.
+
+
+
+
+Conclusion
+The two systems are answering different questions. World Football Elo measures who is the stronger team in world football, including everything they have done before this tournament. TournamentIQ measures who was the stronger team in Qatar 2022, regardless of what came before. In most cases the answers overlap. France and Argentina are the top three in both. But at the edges, Belgium dropping out and Japan appearing, the gap between historical weight and tournament performance becomes visible.
+9. Using TournamentIQ Elo Ratings for FIFA World Cup 2026
+Volatility after the first fixture - Group Stage One
+Elo ratings answer “who is strongest,” and they can also be used to answer which groups have already started to separate, and which are still wide open. Using Elo ratings to calculate standard deviation tells us how spread out the four teams in a group are after their opening match.
+A higher standard deviation means the group has already split, one or two teams clearly ahead. A lower standard deviation means the four teams are still bunched together, nothing decided yet. All teams started with a baseline rating of 1000.
+A Worked Example: Group J
+After the first fixture, Group J stood at Argentina 1028, Austria 1024, Jordan 976, Algeria 972.
+Step 1, mean
+Mean = (1028 + 1024 + 976 + 972) / 4 = 1000
+Step 2, standard deviation
+Each team's deviation from the mean:
+* Algeria: 972 − 1000 = −28
+Standard deviation = √[ Σ(x − mean)² / (n − 1) ]
+= √[ (28² + 24² + (−24)² + (−28)²) / 3 ]
+= √[ (784 + 576 + 576 + 784) / 3 ]
+= √[ 2720 / 3 ]
+= √906.67 = 30.11
+Group Volatility Scores after Fixture One
+Group
+	Std dev
+	Teams (Elo)
+	B
+	0.00
+	Switzerland 1000, Canada 1000, Bosnia-Herzegovina 1000, Qatar 1000
+	G
+	0.00
+	New Zealand 1000, Belgium 1000, Egypt 1000, Iran 1000
+	H
+	0.00
+	Uruguay 1000, Spain 1000, Saudi Arabia 1000, Cape Verde Islands 1000
+	C
+	13.06
+	Scotland 1016, Brazil 1000, Morocco 1000, Haiti 984
+	K
+	19.60
+	Colombia 1024, Portugal 1000, Congo DR 1000, Uzbekistan 976
+	F
+	22.86
+	Sweden 1028, Japan 1000, Netherlands 1000, Tunisia 972
+	A
+	23.55
+	Mexico 1024, South Korea 1016, Czechia 984, South Africa 976
+	L
+	23.55
+	England 1024, Ghana 1016, Panama 984, Croatia 976
+	E
+	26.33
+	Germany 1028, Ivory Coast 1016, Ecuador 984, Curaçao 972
+	D
+	30.11
+	United States 1028, Australia 1024, Turkey 976, Paraguay 972
+	I
+	30.11
+	Norway 1028, France 1024, Senegal 976, Iraq 972
+	J
+	30.11
+	Argentina 1028, Austria 1024, Jordan 976, Algeria 972
+	Table 5: Group Volatility Scores after Fixture One. Groups D, I, and J are the most spread out. Group C has the tightest real spread, and Groups B, G, and H are still at the baseline. 
+What does this mean?
+Groups B, G, and H sit at 0 standard deviation. All four teams drew their opener, so their ratings are still locked at the starting baseline. Group C has the tightest real spread in the tournament so far, a standard deviation of 13.06. Groups D, I, and J are tied for the highest score at 30.11. Each already shows a clear gap between two strong starts and two difficult ones.
+Validating the results
+To validate that this formula was not hallucinating, I ran the same calculation on the 2022 World Cup, using only each team's opening match. Group A came out highest by a wide margin. Group A was the group with Argentina's shock loss to Saudi Arabia, the biggest upset of that tournament, and it ended with the widest points spread of any group at the World Cup. I also checked the underlying results against FIFA's official standings page. Every team showing 0 standard deviation had, in fact, drawn their opener and sat on 1 point, confirming that the database matched the official record.
+
+
+10. What comes next
+Elo in this system ranks team strength and produces a win probability for a given matchup; it does not predict a scoreline. The expected score formula returns a single number between 0 and 1, the probability one team beats the other. Nothing in the formula outputs a number of goals. Predicting an actual score is a separate problem, planned for the Poisson probability model in the next phase of this project, which will use goals scored, goals conceded, and Elo win probability as inputs to estimate a distribution of likely scores for each team, rather than a single number.
+I will be comparing my live 2026 ratings against World Football Elo as the tournament progresses. Where they agree, the signal is strong. Where they diverge, that gap is usually the most interesting story: a team outperforming their historical reputation or a heavyweight performing below their usual level.

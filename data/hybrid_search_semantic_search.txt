@@ -1,0 +1,78 @@
+﻿Semantic Search and Its Limits
+This article documents how I built a semantic search engine over a corpus of East African business proposals, what semantic search is and how it works, and where it fails, using real retrieval results from my own pipeline as evidence.
+1. Scene
+Semantic search is a retrieval approach that finds documents based on meaning rather than exact word matches. Instead of looking for documents that contain the same words as the query, it looks for documents that express the same idea, even when the specific words differ. It is used across a wide range of applications: enterprise knowledge bases where employees search internal documentation, e-commerce platforms where customers describe products in their own words, research tools where users explore academic literature by concept rather than keyword, and customer support systems where incoming queries need to be matched to relevant help articles.
+Semantic search thrives on concept queries. A user searching for "affordable housing finance" will retrieve documents about mortgage subsidies and social housing schemes, even if those exact words never appear together. The strength of the approach is that it does not require the user to know the right vocabulary in advance.
+I built a semantic search engine over twelve East African business proposals covering sectors from agricultural fintech to port logistics. The system allowed a user to type a query and receive the most relevant proposals in return. I will introduce the specific queries I used to test this system in the Approach section, along with the results they produced.
+2. Problem
+Semantic search works by converting text into vectors, which are lists of numbers that represent meaning in a high-dimensional space. Two pieces of text with similar meaning produce vectors that are close together, while two pieces of text with different meaning produce vectors that are far apart.
+The embedding model used here is all-MiniLM-L6-v2 from HuggingFace, which produces 384-dimensional vectors. Every document chunk is embedded once at ingest time and stored in Pinecone. At query time, the query is embedded using the same model, and Pinecone returns the stored chunks whose vectors are closest to the query vector, measured by cosine similarity, a number between 0 and 1 where 1 means identical direction in vector space.
+Semantic search captures meaning across different words. For example, a query for "funding for smallholder farmers" retrieves AgriBoost Kenya even if the specific chunk never uses the word "funding", because the concepts are close in vector space. Paraphrase, synonyms, and conceptual similarity all work in semantic search's favour.
+The main limitation of semantic search is exact term matching. A dense vector represents the overall meaning of a piece of text, but has no mechanism to reward the presence of a specific token, a named entity, a price figure, or a regulation code, independently of the surrounding meaning. For example, "KES 15,000 per month clearing agent" is not a meaningful concept with a semantic neighbourhood. It is a specific contractual figure. Its vector sits somewhere in a general financial-services region of the embedding space, indistinguishable from dozens of other financial figures in other proposals, regardless of whether those proposals contain that specific figure or not.
+3. Approach
+I ran three queries against the semantic pipeline to expose this failure mode systematically. Each query was chosen to test a different retrieval scenario. The table for each query shows the cosine similarity score and the source file for each retrieved result, ordered from highest to lowest score.
+Query 1 — Concept query: solar energy Nairobi informal settlements
+This query tests semantic search in the scenario it was designed for. The query expresses a concept rather than a specific term, and the correct document, SolarGrid Nairobi, is the only proposal in the corpus directly about rooftop solar in Nairobi informal settlements.
+
+
+Score
+	File
+	0.8536
+	solargrid_nairobi.txt
+	0.8530
+	solargrid_nairobi.txt
+	0.8288
+	solargrid_nairobi.txt
+	0.8031
+	solargrid_nairobi.txt
+	0.7572
+	agriboost_microloan.txt
+	
+
+The correct document dominated the top four positions. The deduplication step in the pipeline, which keeps only the highest-scoring chunk per source file before returning results to the user, correctly collapsed these into a single SolarGrid result. Semantic search performed exactly as expected on a concept query.
+Query 2 — Named entity: NBS Bank Uganda
+NBS Bank Uganda appears in CoolChain Uganda's partnerships section as the provider of an equipment financing facility. It is a specific named entity that appears in one document and nowhere else in the corpus.
+
+
+Score
+	File
+	0.8307
+	uganda_cold_chain.pdf
+	0.7654
+	nairobi_fintech_hub.pdf
+	0.7554
+	nairobi_fintech_hub.pdf
+	0.7377
+	nairobi_fintech_hub.pdf
+	0.7357
+	agriboost_microloan.txt
+	
+
+The correct document ranked first. However, all five results came in within a score band of 0.73 to 0.83, a narrow range where every result appeared similarly relevant to the retriever. NairobiPay's fintech proposal appeared three times in the top five despite having no mention of NBS Bank Uganda. Its vectors sit in a similar financial-services region of the embedding space, close enough to the query vector that the retriever had no basis for distinguishing it from the correct result. The scores alone gave no signal that positions two through five were irrelevant.
+Query 3 — Specific figure: KES 15,000 per month clearing agent
+ClearFast's port logistics proposal states its pricing as "KES 15,000/month per clearing agent" in its business model section. This is a specific contractual figure that appears verbatim in one document.
+
+
+Score
+	File
+	0.7651
+	nairobi_fintech_hub.pdf
+	0.7538
+	agriboost_microloan.txt
+	0.7149
+	nairobi_waste_fintech.txt
+	0.7065
+	rwanda_agri_export.pdf
+	0.7846
+	mombasa_port_logistics.pdf
+	
+
+The correct document ranked fifth, with the highest similarity score in the result set yet positioned below four irrelevant proposals. The semantic embedding for "KES 15,000 per month clearing agent" landed in a general financial region of the vector space, close to other proposals that discuss revenue models and pricing, but none of which contain the specific figure being searched for. The retriever had no mechanism to distinguish the document that contained those exact tokens from documents that merely discussed similar financial concepts.
+4. Results
+Here are the findings on the three queries.
+On the concept query, semantic search performed correctly. Four chunks from the right document filled the top four positions before deduplication, and the score gap between the correct document and the fifth result was large enough to reflect genuine relevance. This is the scenario semantic search was built for, and the results confirmed it.
+On the named entity query, the correct document ranked first, but all five results fell within a score band of 0.73 to 0.83. The retriever returned three chunks from an irrelevant fintech proposal in the top five positions, with scores close enough to the correct result that nothing in the output indicated a problem. The scores were consistent where the retrieval was not.
+On the specific figure query, the correct document ranked fifth despite carrying the highest similarity score in the result set. Four proposals with no mention of clearing agents or that specific pricing figure ranked above it. A user reading the top result would have received irrelevant content with no indication that a more relevant document existed further down the list.
+Semantic search is reliable when the query expresses a concept, but unreliable when the query contains specific tokens such as named entities, exact figures, or regulation codes that need to be matched literally rather than interpreted. The failure does not announce itself. A wrong result at position one looks identical to a correct result at position one.
+5. Key Takeaway
+Semantic search is a strong solution for concept queries and a weak one for exact term queries. For a corpus of business proposals, both query types are realistic. A user searching for "proposals addressing food security" needs semantic search. A user searching for "NBS Bank Uganda" or "KES 15,000 per month" needs a retrieval approach that rewards exact token matches alongside semantic similarity.

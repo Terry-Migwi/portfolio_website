@@ -1,0 +1,100 @@
+﻿Resilience and Concurrency: Building a Pipeline That Holds Under Load
+This article documents how I made the semantic search pipeline resilient to external failures and capable of handling concurrent requests, what the techniques involved are, and what the Locust load test revealed about the pipeline's behaviour under load.
+1. Scene
+A search pipeline that works correctly for one user at a time is not the same as a pipeline that works correctly for ten users simultaneously. When multiple requests arrive at the same time, they compete for the same external resources: the Pinecone index, the Claude API, and the HuggingFace embedding model.
+Resilience is about what the pipeline does when an external service fails or responds slowly, while concurrency is about how the pipeline handles multiple requests arriving at the same time, both of which matter for a deployed API as discussed in this article.
+2. Problem
+The semantic search pipeline makes three external calls on every request: a HuggingFace embedding call to encode the query, a Pinecone hybrid search call to retrieve relevant chunks, and a Claude generation call to synthesise an answer. Each of these calls goes over the internet to a third-party service, and networks are unreliable in that services experience occasional latency spikes, rate limits, and brief outages.
+Without resilience logic, a single slow Pinecone response or a transient Claude timeout fails the entire request with a 500 error. The user sees a server error with no explanation. No retry is attempted. If the service is experiencing a brief blip, the next request might have succeeded immediately, but the pipeline has no way to find out.
+Without concurrency, FastAPI's synchronous handlers block the thread while waiting for each external call to complete. Under concurrent load, requests queue behind each other. A Pinecone call that takes three seconds under a single user might take fifteen seconds when ten users are hitting the endpoint simultaneously, because each request waits for all the ones ahead of it to finish before it can start.
+Both problems compound each other. A slow external service that would be tolerable for one user becomes significantly worse for ten, because the thread blocking multiplies across every waiting request.
+3. Approach
+For this semantic search pipeline, I added timeout budgets, retry logic with exponential backoff and jitter, and a circuit breaker to the two external service calls in this pipeline, Pinecone and Claude. I converted the synchronous endpoint handlers to async to allow concurrent request processing. I then ran a Locust load test with 10 concurrent users to capture real latency numbers for the article.
+Timeout budgets
+A timeout budget is the maximum amount of time the pipeline is willing to wait for an external call before treating it as failed. Without a timeout, a slow external service can hold a request open indefinitely, blocking a thread and degrading the experience for every other user waiting behind it.
+I set the following timeout budgets per call type, based on what is reasonable for each service:
+
+
+* Embedding call: 5 seconds
+* Pinecone query: 4 seconds
+* Claude generation: 15 seconds, reflecting the additional time needed to produce tokens rather than just retrieve data
+
+
+Retry with exponential backoff and jitter
+When an external call fails transiently, retrying immediately often succeeds on the second or third attempt. Retrying immediately without any strategy creates a problem: if many clients all fail at the same moment and retry at the same instant, they risk overwhelming the service further.
+To address this, I implemented two strategies:
+
+
+* Exponential backoff, which increases the wait time between each retry. The first retry waits one second, the second waits two, the third waits four, ensuring the service has progressively more time to recover between attempts.
+* Jitter, which adds a small random amount to each wait time so that retrying clients do not all hit the service at the exact same moment.
+
+
+Timeout and retry work simultaneously in this pipeline. When a Pinecone or Claude call exceeds its timeout budget, it is declared failed. The retry logic then kicks in, waiting with exponential backoff and jitter before attempting the call again. A call that times out on the first attempt is retried up to two more times before the error is surfaced to the user.
+tenacity is a Python library that implements retry logic as a decorator, removing the need to write manual retry loops. I used it because it handles the backoff, jitter, and attempt counting in a single declaration on the function, keeping the retry behaviour separate from the call logic itself. The implementation retries up to three times, waiting between one and eight seconds with jitter between each attempt.
+Circuit breaker
+A circuit breaker tracks the failure rate of an external call and temporarily stops sending requests when failures exceed a threshold. This is distinct from retry logic: retry handles individual transient failures, while a circuit breaker handles situations where a service is genuinely unavailable for an extended period. Rather than retrying on every request and burning time on calls that will not succeed, the circuit breaker returns a fast error immediately until the service shows signs of recovery.
+The circuit breaker has three states:
+
+
+* Closed: the service is considered healthy and requests flow normally. This is the default state.
+* Open: the failure threshold has been crossed. Requests fail immediately without attempting the external call. The breaker stays open for a configured cooldown period of 30 seconds.
+* Half-open: the cooldown period has elapsed. One test request is allowed through. If it succeeds, the breaker closes and normal traffic resumes. If it fails, the breaker reopens for another 30 seconds.
+
+
+One circuit breaker is registered per external service, Pinecone and Claude, at module level. Each call checks the breaker before executing and records success or failure after, so the breaker's state reflects the real behaviour of the service rather than assumptions.
+Async endpoints
+A synchronous FastAPI handler blocks its thread while waiting for an external call to complete. An asynchronous handler yields control back to the event loop while waiting, allowing other requests to be processed concurrently on the same thread.
+I converted the following to async:
+
+
+* The /search endpoint handler, declared with async def instead of def, so it can await the search pipeline without blocking.
+* The /rag endpoint handler, for the same reason.
+* The hybrid_search() function in search.py, which coordinates embedding, Pinecone retrieval, deduplication, and re-ranking.
+* The rag_search() function in rag.py, which calls hybrid_search() and then invokes Claude.
+
+
+The HuggingFace embedding call, the Pinecone query, and the cross-encoder re-ranking all use synchronous library APIs with no native async support. Rather than replacing them, I wrapped each one with asyncio.to_thread(), which runs the blocking call in a separate thread pool without blocking the event loop. This means the event loop remains free to handle other incoming requests while each external call runs in its own thread.
+4. Results
+The Locust load test ran with 10 concurrent users, a ramp-up of 2 users per second, and a mix of /search and /rag requests drawn from a pool of realistic queries. The test ran for two minutes against the live pipeline on localhost.
+
+
+Endpoint
+	Requests
+	Failures
+	p50 (ms)
+	p95 (ms)
+	p99 (ms)
+	Min (ms)
+	Max (ms)
+	/rag
+	10
+	0
+	24,000
+	33,000
+	33,000
+	15,334
+	32,549
+	/search
+	35
+	0
+	14,000
+	25,000
+	28,000
+	2,082
+	27,656
+	Aggregated
+	45
+	0
+	15,000
+	28,000
+	33,000
+	2,082
+	32,549
+	
+
+Zero failures across 45 requests. The retry logic was not triggered during this run, which means the external services used, Pinecone and Claude, remained stable throughout the test. The resilience layer is present and correctly wired, but had no failures to recover from.
+The latency numbers reflect the cumulative cost of the full pipeline under concurrent load. A /search request at p50 takes 14 seconds, covering embedding, hybrid Pinecone retrieval, deduplication, and cross-encoder re-ranking in sequence. A /rag request at p50 takes 24 seconds, adding Claude generation on top of everything /search does.
+The p95 spread is wide on both endpoints. /search goes from 14 seconds at p50 to 25 seconds at p95, an 11-second gap. /rag goes from 24 seconds at p50 to 33 seconds at p95, a 9-second gap. This spread reflects the variability of external API response times under concurrent load, where 10 users are simultaneously competing for the same Pinecone index and Claude API capacity.
+These numbers are honest for a pipeline of this complexity running against live external APIs with concurrent users. The async conversion ensures requests do not queue sequentially behind each other. The resilience layer ensures transient failures are retried rather than surfaced immediately as errors. The zero failure rate across the full test confirms both are working correctly.
+5. Key Takeaway
+A pipeline that works for one user is not automatically a pipeline that works for ten. Resilience and concurrency address two different failure modes that compound each other under load. Timeout budgets prevent slow external services from blocking threads indefinitely. Retry with exponential backoff and jitter recovers from transient failures without creating a thundering herd. Circuit breakers stop retrying when a service is genuinely unavailable, returning a fast error instead of burning time on calls that will not succeed. Async endpoints allow concurrent request processing without sequential queuing. The Locust results confirm zero failures under 10 concurrent users, with latency numbers that honestly reflect the cost of a multi-step pipeline calling three external services in sequence.

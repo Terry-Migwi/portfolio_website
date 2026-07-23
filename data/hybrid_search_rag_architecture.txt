@@ -1,0 +1,124 @@
+﻿RAG Architecture: From Retrieval to Answer
+This article documents how the retrieval and generation stages of this pipeline connect, why the connection between them matters, and what the results revealed about where generation quality depends on retrieval and where it does not.
+1. Scene
+Retrieval Augmented Generation, commonly referred to as RAG, is a pattern for grounding a language model's answers in a specific set of documents rather than in its training data alone. The model does not answer from memory. It answers from content that is retrieved at query time and passed to it as context. The result is a system that can give accurate, specific answers about a document corpus it was never trained on, and that can cite where its answers came from.
+RAG is used across a wide range of applications: customer support systems that answer from a company's own documentation, legal research tools that surface relevant case law from private databases, internal knowledge bases where employees query proprietary content, and financial analysis platforms where answers need to be grounded in specific filings or reports rather than general market knowledge.
+I built a RAG system over twelve East African business proposals. A user asking "which proposals address food security" receives a synthesised answer citing specific proposals by name, funding amounts, and technologies, rather than a list of retrieved document excerpts. The retrieval pipeline, covered in the previous three articles, feeds into a generation step where Claude reads the retrieved content and produces that answer. This article documents how that generation step is built, what it does with the retrieved content, and what the results revealed about its limits.
+2. Problem
+The gap between returning relevant document fragments and returning a coherent, specific answer is what the generation step has to close. Search returns excerpts. A user querying a corpus of business proposals does not want to read fifteen retrieved chunks and synthesise an answer themselves. They want the answer.
+Closing that gap introduces a new risk. A language model asked to answer a question about a set of documents can do one of three things: answer correctly from the retrieved content, acknowledge that the retrieved content does not contain enough information to answer, or generate a fluent, plausible answer that is not grounded in the retrieved content at all. The third case is the failure mode RAG is designed to prevent, and it requires the generation step to be built in a way that keeps the model anchored to what was actually retrieved.
+Two design decisions determine whether the generation step stays grounded. The first is what content gets passed to the model. The second is how the prompt instructs the model to use that content.
+3. Approach
+What gets passed to the model
+The retrieval pipeline returns the top three results after hybrid search and re-ranking. Each result is a chunk of approximately 500 characters from a source document. A 500-character chunk is enough for the retriever to identify the right document, but it is not enough for Claude to give a specific, detailed answer. A chunk from AgriBoost Kenya's proposal might contain one paragraph about loan tiers but not the founding team, the satellite credit scoring approach, or the projected default rate.
+Rather than passing the retrieved chunks directly to Claude, the pipeline loads the full text of each source document and passes that instead. Each retrieved document contributes up to 1,500 characters of its full text to the context window, regardless of which specific chunk the retriever identified as most relevant:
+
+
+for i, (doc, score) in enumerate(reranked_results):
+    filename = doc.metadata.get("filename", "unknown")
+    full_text = load_full_text(filename)
+    context = full_text[:1500] if full_text else doc.page_content
+    context_blocks.append(f"PROPOSAL {i+1} — {name}:\n{context}")
+
+
+This means the generation step always has richer context than the retrieval step used to rank results. The retriever identified the right documents using chunks. Claude answers using the full proposal text up to the 1,500-character limit.
+How the prompt instructs the model
+The prompt gives Claude four explicit instructions alongside the retrieved context:
+
+
+_rag_prompt = ChatPromptTemplate.from_template("""
+You are an expert analyst reviewing business proposals.
+
+
+A user asked: "{query}"
+
+
+Here are the most relevant proposals retrieved from the database:
+
+
+{context}
+
+
+Based only on the proposals above, write a clear and direct answer.
+- Mention specific proposals by name where relevant
+- Include concrete details like funding amounts, locations, and technologies
+- If no proposal directly answers the question, say so honestly
+- Keep your answer to 3-5 sentences maximum
+""")
+
+
+"Based only on the proposals above" is the grounding instruction. It tells the model not to draw on general knowledge about East African business or development finance. "If no proposal directly answers the question, say so honestly" is the honesty instruction. It gives the model explicit permission to acknowledge a gap rather than fill it with a plausible but ungrounded answer. The specificity instructions, mentioning proposals by name and including concrete details, push the model toward answers that are verifiable against the retrieved content rather than vague enough to be unfalsifiable.
+How the sources are returned
+Every response from the RAG endpoint returns the answer alongside a list of sources. Each source carries the filename of the retrieved proposal and its re-rank score. This gives the caller visibility into which documents contributed to the answer and how confidently the retriever ranked them:
+
+
+return {
+    "query": query,
+    "answer": response.content.strip(),
+    "sources": sources
+}
+
+
+The re-rank score in the source list is the cross-encoder score, not the Pinecone similarity score. It reflects how the cross-encoder judged each chunk's relevance to the query after retrieval, which is the more accurate signal of the two.
+4. Results
+Two queries illustrate where the generation step worked well and where retrieval quality determined the answer's accuracy.
+Query: which proposals focus on renewable energy?
+
+
+Based on the retrieved proposals, two directly focus on renewable energy:
+
+
+SolarGrid Nairobi (USD 1.2M) installs 500 rooftop solar systems with battery
+storage across Nairobi's informal settlements, using 2.5 kWp systems with
+lithium iron phosphate batteries and M-Pesa pay-as-you-go payments.
+
+
+CoolChain Uganda (USD 1.45M) deploys 20 solar-powered cold storage hubs
+across Ugandan horticultural regions, each powered by 6 kWp solar arrays
+with 40 kWh lithium battery banks for 72-hour autonomy.
+
+
+The third proposal, AgriBoost Kenya, is primarily a fintech solution and
+does not focus on renewable energy, though it supports agriculture broadly.
+
+
+Sources returned:
+File
+	Re-rank score
+	solargrid_nairobi.txt
+	-0.299
+	uganda_cold_chain.pdf
+	-5.821
+	agriboost_microloan.txt
+	-9.407
+	
+
+The answer is accurate and specific. Claude correctly identified both solar proposals, included funding amounts and key technical details for each, and honestly characterised the third retrieved proposal as not focused on renewable energy. The grounding instruction worked: the answer draws only from the retrieved content.
+Query: which proposals address food security?
+
+
+AgriBoost Kenya directly addresses food security. The USD 450,000 proposal
+provides micro-loans to 3.5 million smallholder farmers in Western Kenya,
+enabling them to purchase certified seeds, fertilizer, and irrigation
+equipment. By removing the collateral barrier and offering loans of
+KES 5,000-80,000 tied to harvest cycles, AgriBoost aims to increase farm
+yields by an estimated 40%. The other two proposals, CleanChain and
+NairobiPay, address waste management and SME lending respectively, and do
+not directly target food security.
+
+
+Sources returned:
+File
+	Re-rank score
+	nairobi_waste_fintech.txt
+	-9.498
+	agriboost_microloan.txt
+	-9.511
+	nairobi_fintech_hub.pdf
+	-11.336
+	
+
+The answer is again accurate. Claude identified AgriBoost as the relevant proposal and correctly characterised the other two as not addressing food security. However, the sources tell a different story. AgriBoost ranked second in the source list at -9.511, below CleanChain at -9.498. The score difference of 0.013 is effectively a tie, meaning the re-ranker did not produce a reliable ordering on this broad categorical query. Claude gave the right answer despite the retrieval ordering being wrong, because it read all three full proposal texts and reasoned across them rather than relying on the order in which they were ranked.
+This is an honest finding about the design. Passing full document text rather than retrieved chunks means the generation step can compensate for imperfect retrieval ordering on broad queries. It also means the answer quality is bounded by what the retrieval step surfaced in the first place. If a relevant proposal had not been retrieved at all, no amount of full-text context would have helped.
+5. Key Takeaway
+RAG connects retrieval and generation into a system that can answer specific questions about a document corpus a language model was never trained on. The generation step works best when the retrieved content is accurate, the prompt keeps the model anchored to that content, and the context passed to the model is rich enough to support a specific answer. Passing full document text rather than retrieved chunks provides that richness at the cost of a larger context window. On broad categorical queries where retrieval ordering is unreliable, full-text context allows the model to reason correctly across all retrieved documents rather than depending on the top-ranked chunk alone. The limit of this approach is retrieval coverage: generation can compensate for imperfect ranking, but it cannot compensate for a relevant document that was never retrieved.

@@ -1,0 +1,103 @@
+﻿Orchestrating a Booking Into a Reminder
+From a RAG that answers questions to a system that runs a business process. This article picks up where the previous article on Denta's tool calling left off, and covers what happens after a booking is confirmed.
+1. Scene
+When a patient messages Denta to ask about teeth cleaning and decides to get an appointment, they pick a slot and confirm. The booking agent replies with confirmation, and the conversation ends there.
+However, that booking does not end there. A record of the booking needs to exist somewhere in case a stakeholder or the clinic itself needs it for later use. The patient also needs a reminder twenty-four hours before the appointment itself, since a missed appointment costs the clinic a slot and the patient a fee.
+For the clinic to get a record of the bookings, three things need to happen once a booking is confirmed. 
+* The conversation needs to become a structured record that a database can store, at a minimum, the phone number, the appointment datetime, and the service booked. 
+* That record needs to be logged without making the patient wait for a database write. 
+* A reminder needs to fire twenty-four hours before the appointment date, from a process that may not even be running yet at the moment the booking is confirmed, and that may need to survive for days before that moment arrives.
+2. Problem
+The booking agent produces its confirmation as free text, something like: "You are booked for teeth cleaning on Monday 13 July at 10 am." A human reads that fine. Code cannot log a phone number, a service, and a datetime out of a sentence without either fragile string parsing or another LLM call that might return anything.
+Even with a clean record, writing it to a database inside the same request that replies to the patient adds latency that the patient pays for. A slow write then becomes a slow reply.
+A reminder due twenty-four hours before an appointment cannot live inside the request that confirmed the booking. That request replies to the patient and disappears in under a second. If the appointment is four days out, the reminder needs to fire on day three, long after the original request is gone. The reminder needs to be owned by something that keeps running independently of any single request, and that survives the API process restarting one or more times before that moment arrives. Scheduling a task for a fixed delay from the moment of booking, turns out to be actively dangerous with the broker Denta uses, for reasons covered in the Approach section below.
+3. Approach
+Tool use, recap
+The previous article covers tool use in full, so here is the short version. The LLM does not execute anything. It emits a tool_use block that states its intention, my code runs the real function, and the result goes back as a tool_result. That is the mechanism the booking agent runs on for checking slots and creating appointments. Turning a finished conversation into a clean database record uses the same mechanism, pushed to its opposite extreme, where the model's freedom to choose is removed entirely.
+Forced tool choice: the structured output trick
+The tool_choice parameter controls whether the model answers in text or calls a tool. By default, tool_choice is set to auto, and the model decides between answering in text and calling a tool. That freedom is not always wanted. The API gives three settings: auto, any, which forces the model to call some tool, and a named tool setting, which forces the model to call one specific tool on that turn. Once the tool is forced, the model's only remaining degree of freedom is what arguments to pass.
+Why does with_structured_output mean the model cannot call other tools?
+LangChain's with_structured_output forces the model to output results in a specific format. LLMs naturally produce text, though they can output JSON or other structured data depending on how they are built. Getting data back in a specific structured shape means forcing the model into that structure. In my booking case, I define a tool named record_booking whose input schema is the BookingRecord fields. Forcing record_booking as the tool choice means the model must respond with a tool_use block whose input is JSON matching that schema.
+with_structured_output gives the exact schema needed without going through the ReAct loop. This is why with_structured_output does not support ordinary tool use. It builds the schema from the Pydantic model, binds it as the only tool, forces tool_choice, and parses the input back through Pydantic.
+For Denta's live booking flow, which tool choice option is ideal?
+tool_choice=auto is the right setting. It lets the model decide whether to answer a question or call a tool, which is the better option for the booking conversation because the model needs the freedom to choose what is appropriate based on the patient's message. If the patient says "can I come in for an appointment?" the model can respond by asking for more details before it calls Google Calendar.
+Why would tool_choice=any not work for the booking flow?
+If the patient asks "can I come in for an appointment?" the model does not have all the information needed to make a booking. No date, no name, no service. The model also has explicit instructions not to guess any of these details, and to ask the patient instead if any are missing. tool_choice=any blocks the option to ask, because the model must call some tool. It would have to call one anyway, most plausibly checking available slots, but with a guessed date, even though its own docstring explicitly says not to guess. That leaves two conflicting instructions: the docstring says ask, and the API parameter says no text response is allowed. The API parameter wins that conflict, because it is enforcement, not instruction.
+For the booking flow, auto is correct, because the model needs to lead with clarifying questions, and the freedom to answer in text is the freedom to ask questions. any fits better where the agent's output is never conversation, a pure dispatcher whose every turn must end in one of several actions, picking which tool to call but never speaking.
+Forcing tool_choice for the extraction step
+The live booking flow uses tool_choice=auto throughout. The extraction step, which turns a finished conversation into a BookingRecord, uses the third setting instead, a tool_choice forced to one named tool.
+with_structured_output builds this forced call from the ExtractedBooking model directly. Calling it looks like an ordinary LangChain method, but underneath it is doing exactly what a raw tool_choice call naming a specific tool does.
+extraction_llm = ChatAnthropic(
+    model="claude-haiku-4-5-20251001",
+    api_key=ANTHROPIC_API_KEY,
+    max_tokens=1024,
+)
+ 
+structured_llm = extraction_llm.with_structured_output(
+    ExtractedBooking, include_raw=True
+)
+	ExtractedBooking becomes the schema of the one tool the model is allowed to call on this turn. There is no second tool available, and there is no option to answer in plain text, the way auto allows in the live booking flow. The model's only remaining choice is what values to put into service, appointment_datetime, and notes.
+include_raw=True matters here specifically because the choice is forced. When a tool call is optional, under auto, a plain text reply is always a safe fallback if the model cannot produce something valid. When the tool call is forced, there is no fallback. If the model's output fails to parse into ExtractedBooking, that failure has to surface as data I can inspect, not as a raised exception that ends the process. include_raw=True returns a dictionary with parsed, raw, and parsing_error, so a failed forced call becomes something my retry loop can read and act on rather than something that crashes the extraction step outright.
+This is the concrete difference between the two tool_choice settings in this project. auto, on the live booking flow, gives the model room to ask a clarifying question when information is missing. The forced setting, on extraction, gives the model no room at all, because by the time extraction runs, the conversation is already finished and there is nothing left to ask.
+The API guarantees shape, not sense. Validation lives with the developer.
+Forcing the schema guarantees the required shape: a returned input that is valid JSON syntactically, with all keys present, types matching, and enum fields drawn from the allowed list. It does not guarantee the data is valid. In the booking case, an invalid date can easily get through the schema. If a patient's confirmed date falls outside the clinic's operating hours, or is a date already in the past, that gets into the system fine. The schema has no idea.
+The schema cannot check that sense, because sense depends on facts that live outside the JSON.
+I wrote a validator for each answer. I used two field validators, built with Pydantic's field_validator, to reject past datetimes and to reject non-operating clinic hours. They handle sense in Pydantic, and the retry loop is the bridge between them. When a sense check fails, the validator's error message goes back to the model as feedback, for example "appointment_datetime is in the past, fix it," a semantic rule the validator enforces that the schema alone could not.
+Logging without making the patient wait
+Once a BookingRecord exists, it needs to reach a database, but not on the patient's clock.
+async and await
+async def and await are Python's tools for handling slow operations, such as a network call or a database write, without freezing the whole program while they run. async def marks a function as one that can pause partway through instead of blocking everything until it finishes. await marks exactly where it is allowed to pause, at a call to another async aware operation. While that operation is waiting on input or output, the same process is free to go handle something else in the meantime.
+I use them here because FastAPI runs as one process handling many patients' messages at once. If logging a booking to the database blocked that process for even a second, every other patient messaging the assistant at that moment would wait behind it, even though their conversation has nothing to do with this booking. async and await let the process log this booking's data while still replying to someone else in the meantime.
+FastAPI's BackgroundTasks adds a second layer on top of that. It runs a function only after the response has already gone out to the patient. Even the patient whose booking triggered the logging does not wait for it. The reply arrives first, and the extraction call plus the database write happen afterward, off the patient's critical path entirely.
+I wired process_booking_side_effects as a background task, called after the webhook sends its reply.
+async def process_booking_side_effects(transcript: str, phone: str) -> None:
+    try:
+        record = await asyncio.to_thread(extract_booking, transcript, phone)
+        await log_interaction(record)
+    except Exception:
+        logger.exception("Side effects failed for %s", phone)
+        # Never re-raise. The patient already has their reply.
+	extract_booking is a synchronous LangChain call. It was never written with async and await in mind, so calling it directly inside an async function would still block everything, the same problem I am trying to avoid. asyncio.to_thread runs it on a separate thread instead, so the main process stays free while it works. log_interaction, which writes to SQLite through aiosqlite, is properly async, so it gets a plain await.
+I built the interactions table this writes to with the id, phone, service, appointment datetime, and a logged at timestamp.
+The exception handling here is deliberate. Nothing in this function should raise past its own boundary. A failed database write is a logging problem, not a reason to have broken the booking the patient already received.
+Sending a reminder with Celery and Redis
+Celery is a task queue system, a way to hand work off to a separate process instead of running it inline. Redis, in this setup, is the broker, the in between storage that holds a task message until something is ready to pick it up. Together they split work into three roles. A broker holds task messages. A worker executes them. A scheduler, called Beat, drops a message onto the queue on a fixed interval and does nothing else.
+This is needed here because everything else in Denta lives inside a request. A patient message comes in, work happens, a reply goes out, and that process ends. A reminder that has to fire twenty four hours later cannot live there, because no request exists tomorrow to run it. The reminder needs to be owned by something that keeps running independently of any single patient conversation, and that survives the API process restarting in between.
+I used Redis as the broker. It decouples the thing that decides work must happen from the thing that does it, so either side can restart without the other noticing. A worker sits in a loop asking Redis whether anything is available, executes what it receives, and reports back. Beat is only a clock. It fires every sixty seconds, drops a dispatch_due_notifications message onto the queue, and goes back to sleep.
+What travels through Redis is a message: the task's name as a string, plus its arguments serialized to JSON. The worker imports the same codebase, looks the name up in its own registry, deserializes the arguments, and calls the matching function. The worker and the producer have to share the codebase, or the name lookup fails, and arguments must be JSON serializable. No datetimes and no Pydantic models, only strings and primitives. That constraint is why I designed the dispatcher to take no arguments at all. It reads state from a table instead, which sidesteps the serialization question entirely.
+The obvious way to schedule a twenty four hour reminder is to call apply_async with an eta argument. It looks correct and turns out to be the wrong choice on a Redis broker. A worker prefetches an eta task immediately and holds it in its own memory for the entire twenty four hours. Restarting that worker for any reason, a deploy or a crash, makes the reminder disappear with no trace it ever existed. Redis also applies a visibility timeout, one hour by default, after which an unacknowledged task gets redelivered to another worker, so a twenty four hour eta can produce duplicates on top of the risk of losing the task outright.
+I moved the waiting out of memory and onto disk instead, as a row in a table.
+CREATE TABLE notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT NOT NULL,
+    message TEXT NOT NULL,
+    send_at TEXT NOT NULL,
+    status TEXT DEFAULT 'pending'
+);
+	Nothing gets queued until the moment work is actually due. Beat fires the dispatcher every minute. The dispatcher asks one question, which pending rows have a send_at in the past, sends those, and flips their status to sent.
+@app.task
+def dispatch_due_notifications() -> int:
+    now = datetime.now().isoformat()
+    rows = db.execute(
+        "SELECT id, phone, message FROM notifications "
+        "WHERE status = 'pending' AND send_at <= ?", (now,)
+    ).fetchall()
+    for row_id, phone, message in rows:
+        sms.send(message, [phone])
+        db.execute("UPDATE notifications SET status = 'sent' WHERE id = ?", (row_id,))
+	Restarting anything at any point leaves the state exactly where it was left, because it lives on disk, not in a worker's memory. The queue itself only ever carries the instruction to go check the table, a message that costs nothing to lose since another one arrives sixty seconds later. The trade off is granularity. A reminder lands within a minute of its scheduled time rather than on the exact second, which for a twenty four hour dental reminder makes no practical difference.
+4. Results
+I ran the dispatcher against a live minute by minute schedule with a reminder scheduled through Africa's Talking's sandbox. Two empty cycles returned in under 40 milliseconds each.
+03:19:17  Task dispatch_due_notifications received
+03:19:17  Task succeeded in 0.037s: 0
+03:20:17  Task dispatch_due_notifications received
+03:20:17  Task succeeded in 0.009s: 0
+	The third cycle found the due row and sent it.
+03:21:17  Task dispatch_due_notifications received
+03:21:18  Sent reminder 1 to +254712345678: statusCode 101, status Success
+03:21:18  Task succeeded in 1.265s: 1
+	The three cycles after that returned to zero, confirming that the status flip stopped the dispatcher from resending the reminder. Idle cycles cost almost nothing, and a sent reminder does not repeat.
+A worker crash between the SMS sending and the status update writing would leave the row pending, and the next cycle would send it again, since nothing in the table distinguishes a reminder that never sent from one that sent but was never recorded. For a reminder, a duplicate text is a minor annoyance. The identical gap in a payment task would be a duplicate charge. I accepted at least once delivery here because the task is idempotent enough that a duplicate costs nothing, a judgment that depends on what the task actually does, not on the framework.
+5. Key Takeaway
+Orchestration is the coordination of several independent systems into one outcome that no single system produces alone. A booking confirmation, a database write, and a text message sent a day later are three separate actions, owned by three separate pieces of infrastructure, and orchestration is what makes them behave like one process instead of three unrelated ones.
+I handled it here with three mechanisms, each solving a different part of the coordination problem. I forced a schema so the model's output became a database record instead of a sentence I would have to parse. I deferred the database write to a background task so the patient's reply never waited on it. I replaced an in memory delay with a row on disk so the reminder survived a worker restart. Each mechanism is simple on its own. Put together, they turn one confirmed booking into a record, a log, and a reminder, without the patient ever noticing the work happening behind their single reply.

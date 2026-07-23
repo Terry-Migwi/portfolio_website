@@ -1,0 +1,140 @@
+﻿Anomaly Detection: Model Output Monitoring
+How Denta monitors itself for ungroundedness and out-of-scope replies. This article documents the anomaly detection layer built into Denta, why model output monitoring is a different kind of anomaly detection from the usual statistical case, and how it was proven against a real hallucinated booking.
+1. What is Anomaly Detection
+Anomaly detection is the practice of identifying data points, events, or behaviors that deviate from what a system considers normal. The core idea is to define what normal looks like, then flag anything that falls outside it.
+How anomaly detection is used in AI engineering
+Here are a few common use cases:
+* Fraud detection. A credit card transaction that doesn't match a customer's usual spending pattern, amount, location, merchant type, gets flagged for review.
+* Intrusion detection. Network traffic that deviates from a baseline, an unusual volume of requests, access from an unexpected location, gets flagged as a possible attack.
+* Predictive maintenance. Sensor readings from industrial equipment that drift outside their normal operating range get flagged before the equipment actually fails.
+* Data quality and outlier detection. A row in a dataset with values wildly outside the distribution of everything else, useful for catching data entry errors or corrupted records before they feed into a model.
+* Model output monitoring. A newer category, specific to systems built on LLMs, checking not whether a data point looks unusual, but whether a model's output itself deviates from what it should be, factually, behaviorally, or in scope.
+2. Which Use Case Applies Here
+Denta's anomaly detection falls into model output monitoring, which is different from the rest, such that there is no historical distribution to compare against.
+Why does this use case apply here?
+In this series, I have documented how Denta hallucinated a booking in testing. It produced a fully formatted, confident booking confirmation message with the correct patient name, date, and time, but did not actually create the event. That reply looked like every other successful confirmation.
+Why is this a different case of anomaly detection?
+As mentioned earlier, this case differs from other forms of anomaly detection because there is no historical distribution to compare it against. A booking confirmation is not different because of its shape, it's a problem because of a specific claim inside it, that a booking was actually completed, which may or may not be true, and that has nothing to do with statistical rarity. Nothing about that reply looked statistically unusual, rather, it looked just like every other successful confirmation. A distribution-based anomaly detector, trained on what normal replies look like, would have had no reason to flag it, since it matched the normal shape perfectly. What failed wasn't the shape of the output, it was the truth of a specific claim inside it.
+3. How I Applied Anomaly Detection in Denta
+I applied anomaly detection two ways, as a guardrail and to check for groundedness.
+Anomaly detection as a guardrail
+A guardrail is a check that keeps a system's behavior inside an intended boundary by watching its output and reacting when it strays outside what it's meant to do. Guardrails judge appropriateness by asking, is this response the kind of thing that this system should be producing at all. For this system, the guardrail is checking if the responses produced are relevant for the scope, which is a dental clinic.
+Scope: Does this content belong to this assistant's job?
+I created a scope tool with plain instructions on Denta, dental services offered, pricing, hours, bookings, and dental health questions to define the scope of the assistant. The tool would then consider anything unrelated to dentistry or the clinic as out of scope.
+_SCOPE_TOOL = [{
+    "name": "classify_scope",
+    "description": (
+        "Determine whether this reply is topically appropriate for a "
+        "dental clinic assistant to send. In scope: dental services, "
+        "pricing, hours, bookings, dental health questions. Out of "
+        "scope: anything unrelated to the clinic or dentistry."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "in_scope": {"type": "boolean"}
+        },
+        "required": ["in_scope"],
+    },
+}]
+	I then defined a function, is_in_scope(), that takes the assistant's reply as the argument, runs it through this forced tool, and reads back the answer directly on whether the content fits.
+def is_in_scope(reply_text: str) -> bool:
+    response = _classifier_llm.invoke(
+        reply_text,
+        tools=_SCOPE_TOOL,
+        tool_choice={"type": "tool", "name": "classify_scope"},
+    )
+    tool_call = next((b for b in response.tool_calls), None)
+    if tool_call is None:
+        return True
+    return bool(tool_call["args"].get("in_scope", True))
+	I introduced a failure mode that defaults to true. A failure mode, in this case, is what the function returns when the classification call itself doesn't succeed, a timeout, an API error, or any other fault that prevents a real answer from coming back. It was necessary because a scope check that can't get a clean answer still has to return something, and that something needs to be the safer of the two options. Defaulting to true means the reply is assumed to be in scope when the check itself is unable to run, so an outage in the classifier never turns into every normal reply being wrongly flagged as off-topic.
+This scope guardrail is different from another kind of guardrail already built into Denta, the boundary the model is instructed to hold in its own system prompt.
+f"""You are a helpful assistant for {BUSINESS_NAME}.
+Use the following retrieved context to answer the customer's question.
+If the answer is not in the context, use your general {BUSINESS_DOMAIN} knowledge
+but make clear it is general information. For business-specific questions you cannot
+answer, suggest they call {BUSINESS_PHONE}.
+Do not add closing remarks or unsolicited advice.
+"""
+	This instruction asks the model to hold its own boundary while generating a reply, staying on topic, falling back to general knowledge only when clearly labeled as such, and pointing unanswerable business questions to a phone number. It's a guardrail enforced from the inside, the model is trusted to follow it while producing the response. The scope tool is a guardrail enforced from the outside, a separate check applied after the reply already exists, independent of whether the model followed its own instructions. Having both matters because a system prompt is an instruction, not a guarantee, the model can still drift from it, and when it does, nothing about the reply itself announces that drift. The external check exists precisely for that gap, catching cases where the internal instruction alone wasn't enough.
+Anomaly detection to check for groundedness
+Checking for groundedness means asking whether a claim in a reply is backed by something verifiable, in this case, a real tool call that actually ran, rather than asking whether the reply reads as true or well-formed. This is the check that exists because of the hallucinated booking documented earlier in this series, Denta once produced a fully formatted, confident confirmation with the correct patient name, date, and time, and never actually created the calendar event behind it. The reply was grammatically perfect and looked exactly like a real success. Nothing about its wording gave the fabrication away.
+I created a claim tool with plain instructions to determine whether a message claims that a specific booking has already been completed or confirmed, as opposed to still being discussed, offered, or pending.
+_CLAIM_TOOL = [{
+    "name": "classify_claim",
+    "description": (
+        "Determine whether this message claims that a specific booking "
+        "or appointment has already been completed or confirmed, as "
+        "opposed to still being discussed, offered, or pending."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "claims_completion": {"type": "boolean"}
+        },
+        "required": ["claims_completion"],
+    },
+}]
+	I then defined a function, claims_booking_completed(), that takes the assistant's reply as the argument, runs it through this forced tool, and reads back the answer directly on whether the text asserts a completed booking.
+def claims_booking_completed(reply_text: str) -> bool:
+    response = _classifier_llm.invoke(
+        reply_text,
+        tools=_CLAIM_TOOL,
+        tool_choice={"type": "tool", "name": "classify_claim"},
+    )
+    tool_call = next((b for b in response.tool_calls), None)
+    if tool_call is None:
+        return False
+    return bool(tool_call["args"].get("claims_completion", False))
+	On its own, this function doesn't know whether a booking actually happened, its only job is reading what the text claims. That claim only becomes meaningful once it's compared against whether a real tool call backs it, which happens in the next step.
+I introduced a failure mode that defaults to false. It was necessary for the same underlying reason as the scope tool's failure mode, a check that can't get a clean answer still has to return something safe. Here, the safer default is the opposite direction, assuming the reply does not claim a completed booking when the classifier itself fails, so a broken check produces fewer false alarms about unbacked claims rather than more.
+4. Combining the Checks and Logging Anomalies
+Both checks are combined in one function, the single place main.py actually calls into.
+def check_for_anomaly(phone: str, reply_text: str, tool_confirmed: bool) -> bool:
+    flagged = False
+ 
+    claimed = claims_booking_completed(reply_text)
+    if claimed and not tool_confirmed:
+        log_anomaly(phone, reply_text, "ungrounded_confirmation",
+                    claimed_completion=claimed, tool_confirmed=tool_confirmed)
+        flagged = True
+ 
+    if not is_in_scope(reply_text):
+        log_anomaly(phone, reply_text, "out_of_scope")
+        flagged = True
+ 
+    return flagged
+	This is where the groundedness check's answer actually becomes meaningful. claims_booking_completed() alone only says what the text asserts. check_for_anomaly() is what compares that assertion against tool_confirmed, a boolean passed in from the calling code that reflects whether book_appointment genuinely succeeded this request. A claim with no matching tool success is the mismatch this whole sprint exists to catch.
+Both anomaly types write to one table, distinguished by an anomaly_type column rather than separate tables, since they're two instances of the same underlying pattern, a reply that shouldn't have been sent as written.
+CREATE_SQL = """
+CREATE TABLE IF NOT EXISTS anomalies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT NOT NULL,
+    reply_text TEXT NOT NULL,
+    anomaly_type TEXT NOT NULL,
+    claimed_completion INTEGER,
+    tool_confirmed INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+	claimed_completion and tool_confirmed are nullable, since they only carry meaning for the groundedness check, a scope anomaly has nothing to put in either column.
+This check runs inline, before the reply is sent, not as a background task. That's a deliberate trade-off. Denta's other background work, extraction, logging, reminder scheduling, all happen after the patient already has their reply, so nothing slows down what they see. This check adds a small amount of latency to every single reply instead, a cost accepted here specifically because the project doesn't need to optimize for that yet.
+5. Proving It Against a Real Bug
+The strongest test wasn't a synthetic example, it was the exact reply text from the incident that motivated this sprint in the first place.
+hallucinated_reply = (
+    "Perfect! Your appointment is confirmed.\n\n"
+    "Appointment Details:\n"
+    "Name: Marilyn Monroe\n"
+    "Service: Teeth cleaning\n"
+    "Date: Monday, 13 July 2026\n"
+    "Time: 12:00 PM\n"
+    "Phone: +254700000097"
+)
+flagged = check_for_anomaly("+254700000097", hallucinated_reply, tool_confirmed=False)
+# flagged == True
+	With tool_confirmed=False, matching what was actually true that day, check_for_anomaly() flagged it correctly, ungrounded_confirmation. A real confirmed booking, with tool_confirmed=True, was correctly left alone. Two more cases proved the scope check independently, an off-topic reply flagged, a legitimate dental reply left alone.
+I didn't need to reproduce the original routing bug to run this test. That bug is now structurally prevented by a separate fix, booking's session memory no longer shares state with the FAQ chain. This monitor doesn't care how a bad reply gets produced, only whether it can tell a fabricated one from a real one when handed both directly. That's the right property for a monitor to have, since it means it isn't only tested against the one specific bug that inspired it, it's tested against the shape of the failure, which could reappear through a completely different bug in the future.
+Conclusion
+I used anomaly detection to monitor the system and check what goes wrong. If something went wrong, it would be logged as an anomaly in a table. This is for self-monitoring purposes, designed to keep the monitor trustworthy over time. If a monitor produces false alarms during its own outages, it resorts to being ignored, and it loses that trust. Both checks do not produce an alert when the system goes wrong, they record that instead.
+Anomaly detection in this system is about catching a system telling a confident, plausible lie, which by definition never looks unusual, not about catching statistically rare events.
