@@ -498,6 +498,166 @@ nav a, nav span {
 .stats-bar .stat-item {
   flex: 1;
 }
+
+/* CHATBOT */
+.chat-widget {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 1.5rem;
+  z-index: 200;
+  font-family: var(--font-sans);
+}
+
+.chat-toggle {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--black);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.chat-toggle:hover { background: var(--gray-700); }
+
+.chat-toggle svg { width: 22px; height: 22px; color: var(--white); }
+
+.chat-box {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  bottom: 64px;
+  left: 0;
+  width: 340px;
+  height: 460px;
+  background: var(--white);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.chat-box.open { display: flex; }
+
+.chat-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--gray-100);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-header-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--black);
+}
+
+.chat-header-sub {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+  margin-top: 1px;
+}
+
+.chat-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--gray-300);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.chat-close:hover { color: var(--black); }
+.chat-close svg { width: 16px; height: 16px; }
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-msg {
+  max-width: 85%;
+  font-size: 0.825rem;
+  line-height: 1.55;
+  padding: 0.6rem 0.875rem;
+  border-radius: 12px;
+}
+
+.chat-msg.assistant {
+  background: var(--gray-50);
+  color: var(--gray-700);
+  border: 1px solid var(--gray-100);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-msg.user {
+  background: var(--black);
+  color: var(--white);
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-msg.typing {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-100);
+  align-self: flex-start;
+  color: var(--gray-300);
+  font-style: italic;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-input-row {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--gray-100);
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.chat-input {
+  flex: 1;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.825rem;
+  font-family: var(--font-sans);
+  color: var(--black);
+  outline: none;
+  transition: border-color 0.2s;
+  resize: none;
+}
+
+.chat-input:focus { border-color: var(--gray-300); }
+
+.chat-send {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--black);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.chat-send:hover { background: var(--gray-700); }
+.chat-send svg { width: 15px; height: 15px; color: var(--white); }
+
 </style>
 </head>
 <body>
@@ -750,6 +910,86 @@ nav a, nav span {
     </a>
   </div>
 </footer>
+
+<!-- CHATBOT -->
+<div class="chat-widget">
+  <div class="chat-box" id="chatBox">
+    <div class="chat-header">
+      <div>
+        <div class="chat-header-title">Ask about Terry</div>
+        <div class="chat-header-sub">Projects, background, skills</div>
+      </div>
+      <button class="chat-close" onclick="toggleChat()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-msg assistant">Ask me about these projects</div>
+    </div>
+    <div class="chat-input-row">
+      <input type="text" class="chat-input" id="chatInput" placeholder="Ask a question..." onkeydown="if(event.key==='Enter') sendMessage()">
+      <button class="chat-send" onclick="sendMessage()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+  <button class="chat-toggle" onclick="toggleChat()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  </button>
+</div>
+
+<script>
+  const conversationHistory = [];
+
+  function toggleChat() {
+    const box = document.getElementById('chatBox');
+    box.classList.toggle('open');
+    if (box.classList.contains('open')) {
+      document.getElementById('chatInput').focus();
+    }
+  }
+
+  async function sendMessage() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    appendMessage('user', text);
+    conversationHistory.push({ role: 'user', content: text });
+
+    const typing = appendMessage('typing', 'Typing...');
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: conversationHistory })
+      });
+
+      const data = await res.json();
+      typing.remove();
+
+      const reply = data.reply || 'Sorry, something went wrong. Please try again.';
+      conversationHistory.push({ role: 'assistant', content: reply });
+      appendMessage('assistant', reply);
+
+    } catch (err) {
+      typing.remove();
+      appendMessage('assistant', 'Something went wrong. Please try again.');
+    }
+  }
+
+  function appendMessage(role, text) {
+    const messages = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    div.className = `chat-msg ${role}`;
+    div.textContent = text;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    return div;
+  }
+</script>
 
 </body>
 </html>
