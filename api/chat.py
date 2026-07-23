@@ -1,10 +1,15 @@
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+    
 from http.server import BaseHTTPRequestHandler
 import json
 import os
 import urllib.request
 import urllib.error
-from dotenv import load_dotenv
-load_dotenv()
+
 
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 PINECONE_API_KEY   = os.environ.get("PINECONE_API_KEY")

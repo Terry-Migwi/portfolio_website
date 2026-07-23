@@ -1,1 +1,2 @@
 # portfolio chatbot - no external runtime dependencies
+python-dotenv
