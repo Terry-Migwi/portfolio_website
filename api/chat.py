@@ -1,66 +1,62 @@
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-    
 from http.server import BaseHTTPRequestHandler
 import json
 import os
 import urllib.request
-import urllib.error
-
 
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY")
 PINECONE_API_KEY   = os.environ.get("PINECONE_API_KEY")
 PINECONE_HOST      = os.environ.get("PINECONE_HOST")
-HUGGINGFACE_API_KEY = os.environ.get("HUGGING_FACE_HUB_KEY")
 
 NAMESPACE = "portfolio"
 
 
-def embed_question(question: str) -> list:
-    url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
-    payload = json.dumps({
-        "inputs": question,
-        "options": {"wait_for_model": True}
+def embed_and_query(question: str) -> list:
+    # Use Pinecone's inference API to embed the question
+    embed_url = "https://api.pinecone.io/embed"
+    embed_payload = json.dumps({
+        "model": "multilingual-e5-large",
+        "inputs": [{"text": question}],
+        "parameters": {
+            "input_type": "query",
+            "truncate": "END"
+        }
     }).encode("utf-8")
 
-    req = urllib.request.Request(
-        url,
-        data=payload,
+    embed_req = urllib.request.Request(
+        embed_url,
+        data=embed_payload,
         headers={
-            "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
-            "Content-Type": "application/json"
+            "Api-Key": PINECONE_API_KEY,
+            "Content-Type": "application/json",
+            "X-Pinecone-API-Version": "2024-10"
         }
     )
-    with urllib.request.urlopen(req) as response:
-        embedding = json.loads(response.read())
+    with urllib.request.urlopen(embed_req) as response:
+        embed_data = json.loads(response.read())
 
-    return embedding[0] if isinstance(embedding[0], list) else embedding
+    vector = embed_data["data"][0]["values"]
 
-
-def query_pinecone(vector: list) -> list:
-    url = f"https://{PINECONE_HOST}/query"
-    payload = json.dumps({
+    # Query Pinecone with the embedding
+    query_url = f"https://{PINECONE_HOST}/query"
+    query_payload = json.dumps({
         "vector": vector,
         "topK": 5,
         "namespace": NAMESPACE,
         "includeMetadata": True
     }).encode("utf-8")
 
-    req = urllib.request.Request(
-        url,
-        data=payload,
+    query_req = urllib.request.Request(
+        query_url,
+        data=query_payload,
         headers={
             "Api-Key": PINECONE_API_KEY,
             "Content-Type": "application/json"
         }
     )
-    with urllib.request.urlopen(req) as response:
-        data = json.loads(response.read())
+    with urllib.request.urlopen(query_req) as response:
+        query_data = json.loads(response.read())
 
-    return data.get("matches", [])
+    return query_data.get("matches", [])
 
 
 def build_context(matches: list) -> str:
@@ -73,18 +69,20 @@ def build_context(matches: list) -> str:
 
 
 def call_claude(messages: list, context: str) -> str:
-    system_prompt = f"""You are an assistant on Terry Migwi's portfolio website. Your job is to answer questions about Terry's projects using the retrieved context below.
+    system_prompt = f"""You are an assistant on Terry Migwi's portfolio website. Your job is to answer questions about Terry's projects only, using the retrieved context below.
 
-If someone asks about anything outside of these projects, including Terry's personal background, availability, salary, or anything else not covered in the context, respond with: "I am sorry, I do not have an answer for that. Feel free to contact Terry."
+If someone asks about anything outside of these projects, including Terry's personal background, availability, salary, or anything else not covered in the context, respond with: 
+"I am sorry, my instructions are to stay within the scope of these projects. If you would like more information on this, feel free to contact Terry."
+Important: Denta is a messaging assistant that works over both WhatsApp and SMS channels. Do not describe it as WhatsApp-only. Always refer to it as a messaging assistant.
 
 Do not make up any information not present in the context. Keep responses concise and professional.
 
 Portfolio overview:
 This portfolio contains four projects:
-1. Denta — a production-grade messaging assistant with RAG and tool calling for bookings, built for a dental clinic but designed for any business taking bookings over a messaging channel.
-2. Hybrid Search — a production-ready document search engine combining semantic search and keyword search with LLM answer synthesis, secured with JWT authentication.
-3. TournamentIQ — a live AI match intelligence platform built on 2026 FIFA World Cup data, combining Elo ratings, Poisson probability modelling, Bayesian inference, and LangGraph orchestration to generate narrative match intelligence briefs.
-4. Attendance Tracker — a Python automation that reduced weekly learner attendance tracking from 2 hours to under 10 minutes.
+1. Denta - a messaging assistant with RAG and tool calling for bookings, designed for any business taking bookings or appointments over a messaging channel.
+2. Hybrid Search - a production-ready document search engine combining semantic search and keyword search with LLM answer synthesis, secured with JWT authentication.
+3. TournamentIQ - a live AI match intelligence platform built on 2026 FIFA World Cup data, combining Elo ratings, Poisson probability modelling, Bayesian inference, and LangGraph orchestration to generate narrative match intelligence briefs.
+4. Attendance Tracker - a Python automation that reduced weekly learner attendance tracking from 2 hours to under 10 minutes.
 
 Retrieved context:
 {context}"""
@@ -119,17 +117,14 @@ class handler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length)
 
         try:
-            payload = json.loads(body)
+            payload  = json.loads(body)
             messages = payload.get("messages", [])
 
             if not messages:
                 self._respond(400, {"error": "Invalid request body"})
                 return
 
-            user_question = messages[-1]["content"]
-
-            vector  = embed_question(user_question)
-            matches = query_pinecone(vector)
+            matches = embed_and_query(messages[-1]["content"])
             context = build_context(matches)
             reply   = call_claude(messages, context)
 
