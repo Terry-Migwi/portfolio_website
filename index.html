@@ -410,45 +410,142 @@ nav a, nav span {
     padding: 3px 10px;
   }
 
-  /* GITHUB CARD */
-  .project-github-wrap {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 16/9;
-    background: #0d1117;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    gap: 1rem;
-    text-align: center;
-    padding: 2rem;
-  }
+  /* PROJECT CARD SIDE BY SIDE */
+.project-card {
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
 
-  .project-github-wrap svg { color: #4a7a9a; }
+.project-card:hover {
+  border-color: var(--gray-300);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+}
 
-  .github-label {
-    font-family: 'Courier New', monospace;
-    font-size: 0.75rem;
-    color: #3a6070;
-    line-height: 1.8;
-  }
+.project-visual {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: var(--black);
+  min-height: 280px;
+}
 
-  .github-link-btn {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 0.55rem 1.1rem;
-    background: transparent;
-    border: 1px solid #2a4060;
-    border-radius: var(--radius-sm);
-    color: #7db8d0;
-    font-size: 0.8rem;
-    font-weight: 500;
-    font-family: var(--font-sans);
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
-    text-decoration: none;
-    margin-top: 0.5rem;
-  }
+.project-visual video,
+.project-visual iframe,
+.project-visual svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: none;
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
 
-  .github-link-btn:hover { border-color: #4a7090; color: #a0d0e8; }
+.project-body {
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.project-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.project-name {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  color: var(--black);
+  letter-spacing: -0.01em;
+}
+
+.project-description {
+  font-size: 0.875rem;
+  color: var(--gray-500);
+  line-height: 1.65;
+}
+
+.project-impact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--teal-800);
+  background: var(--teal-50);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.75rem;
+  width: fit-content;
+}
+
+.project-impact svg {
+  width: 13px;
+  height: 13px;
+  color: var(--teal-400);
+  flex-shrink: 0;
+}
+
+.project-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stack-tag {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--gray-500);
+  background: var(--gray-50);
+  border: 1px solid var(--gray-100);
+  border-radius: 100px;
+  padding: 3px 10px;
+}
+
+.project-live-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--teal-600);
+  border: 1px solid var(--teal-50);
+  background: var(--teal-50);
+  border-radius: 100px;
+  padding: 0.25rem 0.65rem;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.project-live-link:hover { background: #c0eedd; }
+.project-live-link svg { width: 11px; height: 11px; }
+
+.project-github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--gray-500);
+  transition: color 0.2s;
+  width: fit-content;
+}
+
+.project-github-link:hover { color: var(--black); }
+.project-github-link svg { width: 15px; height: 15px; }
+
+@media (max-width: 768px) {
+  .project-card { grid-template-columns: 1fr; }
+  .project-visual { min-height: 200px; aspect-ratio: 16/9; position: relative; }
+}
 
   /* FOOTER */
   footer {
@@ -766,239 +863,241 @@ nav a, nav span {
 
     <!-- PROJECT 1: DENTA -->
     <div class="project-card">
-      <div class="project-video-wrap">
-        <video controls>
-          <source src="messaging_assistant_demo.mp4" type="video/mp4">
-        </video>
-      </div>
-      <div class="project-body">
-        <div class="project-header">
-          <h3 class="project-name">Denta . Messaging Assistant</h3>
-          <a href="https://huggingface.co/spaces/Tee-M/messaging-assistant" target="_blank" class="project-live-link">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            Live on HF Spaces
-          </a>
-        </div>
-        <p class="project-description">
-          Denta is a messaging assistant that answers customer questions grounded in a business's own documentation, then hands off to a tool-calling agent that checks real calendar availability, creates genuine bookings, records the appointment, and sends a follow-up reminder 24 hours before. Built for a dental clinic but designed for any business that provides customer support and takes bookings or appointments over a messaging tool.
-        </p>
-        <div class="project-impact">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-          Load tested at 123 concurrent users with zero failures
-        </div>
-        <div class="project-stack">
-          <span class="stack-tag">LangGraph</span>
-          <span class="stack-tag">Claude Haiku</span>
-          <span class="stack-tag">Pinecone</span>
-          <span class="stack-tag">HuggingFace</span>
-          <span class="stack-tag">FastAPI</span>
-          <span class="stack-tag">Celery + Redis</span>
-          <span class="stack-tag">Google Calendar API</span>
-          <span class="stack-tag">Africa's Talking</span>
-          <span class="stack-tag">Docker</span>
-        </div>
-      </div>
+      
+      <!-- PROJECT 1: DENTA -->
+  <div class="project-card">
+    <div class="project-visual">
+      <!-- REPLACE with your Denta demo video -->
+      <!-- <video controls><source src="denta_demo.mp4" type="video/mp4"></video> -->
+      <video controls>
+        <source src="messaging_assistant_demo.mp4" type="video/mp4">
+      </video>
     </div>
-
-    <!-- PROJECT 2: HYBRID SEARCH -->
-    <div class="project-card">
-      <div class="project-video-wrap">
-        <video controls>
-          <source src="hybrid_search_demo.mp4" type="video/mp4">
-        </video>
-      </div>
-      <div class="project-body">
-        <div class="project-header">
-          <h3 class="project-name">Hybrid Search . Document Search Engine</h3>
-          <a href="https://huggingface.co/spaces/Tee-M/semantic_search" target="_blank" class="project-live-link">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            Live on HF Spaces
-          </a>
-        </div>
-        <p class="project-description">
-          A hybrid search engine that combines semantic search and keyword search. It retrieves the right documents regardless of the query type, then uses an LLM to synthesize direct answers from the retrieved content. The API is secured with JWT authentication and built with input guardrails and circuit-breaker resilience patterns. It is ideal for searching proposals, contracts, reports, or internal knowledge bases.
-        </p>
-        <div class="project-impact">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-          Cross-encoder re-ranking widened the relevance score gap by 153x on named entity queries
-        </div>
-        <div class="project-stack">
-          <span class="stack-tag">Pinecone</span>
-          <span class="stack-tag">BM25</span>
-          <span class="stack-tag">Cross-encoder</span>
-          <span class="stack-tag">LangChain</span>
-          <span class="stack-tag">Claude Haiku</span>
-          <span class="stack-tag">FastAPI</span>
-          <span class="stack-tag">HuggingFace</span>
-          <span class="stack-tag">Docker</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- PROJECT 3: TOURNAMENTIQ -->
-    <div class="project-card">
-      <div class="project-video-wrap">
-        <svg width="100%" viewBox="0 0 680 320" role="img" style="display:block;">
-          <title>TournamentIQ illustration</title>
-          <rect width="680" height="320" fill="#0a1a0f"/>
-          <rect x="80" y="40" width="520" height="240" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
-          <circle cx="340" cy="160" r="50" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
-          <line x1="340" y1="40" x2="340" y2="280" stroke="#1a4a2a" stroke-width="1.5"/>
-          <circle cx="340" cy="160" r="3" fill="#1a4a2a"/>
-          <rect x="80" y="100" width="90" height="120" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
-          <rect x="80" y="130" width="40" height="60" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
-          <rect x="510" y="100" width="90" height="120" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
-          <rect x="640" y="130" width="40" height="60" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
-          <rect x="80" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
-          <rect x="184" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
-          <rect x="288" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
-          <rect x="392" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
-          <rect x="496" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
-          <rect x="96" y="56" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
-          <text x="110" y="75" fill="#1D9E75" font-size="10" font-family="monospace">ELO RATING</text>
-          <text x="110" y="95" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">1847</text>
-          <rect x="454" y="56" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
-          <text x="468" y="75" fill="#1D9E75" font-size="10" font-family="monospace">WIN PROB</text>
-          <text x="468" y="95" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">67.3%</text>
-          <rect x="96" y="212" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
-          <text x="110" y="231" fill="#1D9E75" font-size="10" font-family="monospace">POISSON λ</text>
-          <text x="110" y="251" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">2.14</text>
-          <rect x="454" y="212" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
-          <text x="468" y="231" fill="#1D9E75" font-size="10" font-family="monospace">BAYESIAN ADJ</text>
-          <text x="468" y="251" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">+0.12</text>
-          <rect x="290" y="130" width="100" height="60" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="1"/>
-          <text x="340" y="155" text-anchor="middle" fill="#4a8a6a" font-size="10" font-family="monospace">LIVE</text>
-          <text x="340" y="178" text-anchor="middle" fill="#e0fdf4" font-size="20" font-weight="500" font-family="monospace">2 — 1</text>
-          <circle cx="160" cy="130" r="5" fill="#1D9E75" opacity="0.8"/>
-          <circle cx="160" cy="160" r="5" fill="#1D9E75" opacity="0.8"/>
-          <circle cx="160" cy="190" r="5" fill="#1D9E75" opacity="0.8"/>
-          <circle cx="220" cy="110" r="5" fill="#1D9E75" opacity="0.8"/>
-          <circle cx="220" cy="160" r="5" fill="#1D9E75" opacity="0.8"/>
-          <circle cx="220" cy="210" r="5" fill="#1D9E75" opacity="0.8"/>
-          <circle cx="460" cy="130" r="5" fill="#e05050" opacity="0.8"/>
-          <circle cx="460" cy="160" r="5" fill="#e05050" opacity="0.8"/>
-          <circle cx="460" cy="190" r="5" fill="#e05050" opacity="0.8"/>
-          <circle cx="520" cy="110" r="5" fill="#e05050" opacity="0.8"/>
-          <circle cx="520" cy="160" r="5" fill="#e05050" opacity="0.8"/>
-          <circle cx="520" cy="210" r="5" fill="#e05050" opacity="0.8"/>
-        </svg>
-      </div>
-        <a href="https://github.com/Terry-Migwi/TournamentIQ" target="_blank" class="github-link-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
-          View on GitHub
+    <div class="project-body">
+      <div class="project-header">
+        <h3 class="project-name">Denta . Messaging Assistant</h3>
+        <a href="https://huggingface.co/spaces/Tee-M/messaging-assistant" target="_blank" class="project-live-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Live
         </a>
       </div>
-      <div class="project-body">
-        <div class="project-header">
-          <h3 class="project-name">TournamentIQ . Live Match Intelligence</h3>
-        </div>
-        <p class="project-description">
-          A live AI match intelligence platform built on 2026 FIFA World Cup data. It combines Elo ratings, a Poisson probability model with Bayesian inference, a LangChain ReAct agent, and a LangGraph tiered orchestration layer to generate narrative match intelligence briefs.
-        </p>
-        <div class="project-impact">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-          Elo ratings with Poisson V4, Laplace smoothing, Winsorization, and recency weighting
-        </div>
-        <div class="project-stack">
-          <span class="stack-tag">LangGraph</span>
-          <span class="stack-tag">LangChain ReAct</span>
-          <span class="stack-tag">Claude Haiku/Sonnet</span>
-          <span class="stack-tag">SQLAlchemy</span>
-          <span class="stack-tag">Pydantic</span>
-          <span class="stack-tag">Tavily</span>
-          <span class="stack-tag">SQLite</span>
-        </div>
+      <p class="project-description">
+        Denta is a messaging assistant that answers customer questions grounded in a business's own documentation, then hands off to a tool-calling agent that checks real calendar availability, creates genuine bookings, records the appointment, and sends a follow-up reminder 24 hours before. Built for a dental clinic but designed for any business that provides customer support and takes bookings or appointments over a messaging tool.
+      </p>
+      <div class="project-impact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        Load tested at 123 concurrent users with zero failures
+      </div>
+      <div class="project-stack">
+        <span class="stack-tag">LangGraph</span>
+        <span class="stack-tag">Claude Haiku</span>
+        <span class="stack-tag">Pinecone</span>
+        <span class="stack-tag">FastAPI</span>
+        <span class="stack-tag">Celery + Redis</span>
+        <span class="stack-tag">Google Calendar API</span>
+        <span class="stack-tag">Africa's Talking</span>
+        <span class="stack-tag">Docker</span>
       </div>
     </div>
+  </div>
 
-    <!-- PROJECT 4: ATTENDANCE TRACKER -->
-    <div class="project-card">
-      <div class="project-github-wrap">
-        <svg width="100%" viewBox="0 0 680 320" role="img" style="display:block;">
-            <title>Attendance Tracker illustration</title>
-            <rect width="680" height="320" fill="#0a0f1a"/>
-            <rect x="60" y="30" width="360" height="260" rx="4" fill="#0d1525" stroke="#1a2a4a" stroke-width="0.5"/>
-            <rect x="60" y="30" width="360" height="32" rx="4" fill="#0f2040"/>
-            <text x="80" y="51" fill="#7db8d0" font-size="11" font-family="monospace">Name</text>
-            <text x="200" y="51" fill="#7db8d0" font-size="11" font-family="monospace">Email</text>
-            <text x="340" y="51" fill="#7db8d0" font-size="11" font-family="monospace">Status</text>
-            <line x1="60" y1="62" x2="420" y2="62" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="60" y1="94" x2="420" y2="94" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="60" y1="126" x2="420" y2="126" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="60" y1="158" x2="420" y2="158" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="60" y1="190" x2="420" y2="190" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="60" y1="222" x2="420" y2="222" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="60" y1="254" x2="420" y2="254" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="180" y1="30" x2="180" y2="290" stroke="#1a2a4a" stroke-width="0.5"/>
-            <line x1="320" y1="30" x2="320" y2="290" stroke="#1a2a4a" stroke-width="0.5"/>
-            <text x="80" y="83" fill="#a0c8e0" font-size="11" font-family="monospace">Aisha M.</text>
-            <text x="195" y="83" fill="#4a7090" font-size="10" font-family="monospace">aisha@...</text>
-            <rect x="330" y="68" width="56" height="18" rx="3" fill="#0a2a1a"/>
-            <text x="358" y="81" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
-            <text x="80" y="115" fill="#a0c8e0" font-size="11" font-family="monospace">Brian K.</text>
-            <text x="195" y="115" fill="#4a7090" font-size="10" font-family="monospace">brian@...</text>
-            <rect x="330" y="100" width="56" height="18" rx="3" fill="#0a2a1a"/>
-            <text x="358" y="113" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
-            <rect x="60" y="126" width="360" height="32" fill="#2a0f0f" opacity="0.6"/>
-            <text x="80" y="147" fill="#e08080" font-size="11" font-family="monospace">Carol N.</text>
-            <text x="195" y="147" fill="#4a7090" font-size="10" font-family="monospace">carol@...</text>
-            <rect x="330" y="132" width="56" height="18" rx="3" fill="#2a0a0a"/>
-            <text x="358" y="145" text-anchor="middle" fill="#e05050" font-size="10" font-family="monospace">absent</text>
-            <text x="80" y="179" fill="#a0c8e0" font-size="11" font-family="monospace">David O.</text>
-            <text x="195" y="179" fill="#4a7090" font-size="10" font-family="monospace">david@...</text>
-            <rect x="330" y="164" width="56" height="18" rx="3" fill="#0a2a1a"/>
-            <text x="358" y="177" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
-            <rect x="60" y="190" width="360" height="32" fill="#2a0f0f" opacity="0.6"/>
-            <text x="80" y="211" fill="#e08080" font-size="11" font-family="monospace">Eve W.</text>
-            <text x="195" y="211" fill="#4a7090" font-size="10" font-family="monospace">eve@...</text>
-            <rect x="330" y="196" width="56" height="18" rx="3" fill="#2a0a0a"/>
-            <text x="358" y="209" text-anchor="middle" fill="#e05050" font-size="10" font-family="monospace">absent</text>
-            <text x="80" y="243" fill="#a0c8e0" font-size="11" font-family="monospace">Frank J.</text>
-            <text x="195" y="243" fill="#4a7090" font-size="10" font-family="monospace">frank@...</text>
-            <rect x="330" y="228" width="56" height="18" rx="3" fill="#0a2a1a"/>
-            <text x="358" y="241" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
-            <text x="80" y="273" fill="#2a4a6a" font-size="14" font-family="monospace">· · ·</text>
-            <text x="200" y="273" fill="#2a4a6a" font-size="14" font-family="monospace">· · ·</text>
-            <text x="340" y="273" fill="#2a4a6a" font-size="14" font-family="monospace">· · ·</text>
-            <rect x="450" y="30" width="170" height="260" rx="4" fill="#0d1525" stroke="#1a2a4a" stroke-width="0.5"/>
-            <rect x="450" y="30" width="170" height="32" rx="4" fill="#0f2040"/>
-            <text x="535" y="51" text-anchor="middle" fill="#7db8d0" font-size="11" font-family="monospace">Summary</text>
-            <text x="465" y="90" fill="#4a7090" font-size="10" font-family="monospace">Total learners</text>
-            <text x="465" y="108" fill="#a0c8e0" font-size="20" font-weight="500" font-family="monospace">100</text>
-            <line x1="450" y1="122" x2="620" y2="122" stroke="#1a2a4a" stroke-width="0.5"/>
-            <text x="465" y="142" fill="#4a7090" font-size="10" font-family="monospace">Present</text>
-            <text x="465" y="160" fill="#1D9E75" font-size="20" font-weight="500" font-family="monospace">87</text>
-            <line x1="450" y1="174" x2="620" y2="174" stroke="#1a2a4a" stroke-width="0.5"/>
-            <text x="465" y="194" fill="#4a7090" font-size="10" font-family="monospace">Absent</text>
-            <text x="465" y="212" fill="#e05050" font-size="20" font-weight="500" font-family="monospace">13</text>
-            <line x1="450" y1="226" x2="620" y2="226" stroke="#1a2a4a" stroke-width="0.5"/>
-            <text x="465" y="248" fill="#4a7090" font-size="10" font-family="monospace">Time saved</text>
-            <text x="465" y="266" fill="#1D9E75" font-size="16" font-weight="500" font-family="monospace">~2 hrs/wk</text>
-          </svg>
-        </div>
-        <a href="https://github.com/Terry-Migwi/Attendance-Tracking" target="_blank" class="github-link-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
-          View on GitHub
+  <!-- PROJECT 2: HYBRID SEARCH -->
+  <div class="project-card">
+    <div class="project-visual">
+      <video controls>
+        <source src="hybrid_search_demo.mp4" type="video/mp4">
+      </video>
+    </div>
+    <div class="project-body">
+      <div class="project-header">
+        <h3 class="project-name">Hybrid Search . Document Search Engine</h3>
+        <a href="https://huggingface.co/spaces/Tee-M/semantic_search" target="_blank" class="project-live-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Live
         </a>
       </div>
-      <div class="project-body">
-        <div class="project-header">
-          <h3 class="project-name">Attendance Tracker . Learner Attendance Automation</h3>
-        </div>
-        <p class="project-description">
-          A Python automation that tracks learner attendance. It compares a learner roster against session attendance exports, identifies absentees, and produces a clean output spreadsheet, completing the process in under 5 minutes. It reduced weekly attendance tracking from 2 hours to under 10 minutes.
-        </p>
-        <div class="project-impact">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
-          Reduced weekly attendance tracking from 2 hours to under 10 minutes
-        </div>
-        <div class="project-stack">
-          <span class="stack-tag">Python</span>
-          <span class="stack-tag">Pandas</span>
-          <span class="stack-tag">OpenPyXL</span>
-        </div>
+      <p class="project-description">
+        A hybrid search engine that combines semantic search and keyword search. It retrieves the right documents regardless of the query type, then uses an LLM to synthesize direct answers from the retrieved content. The API is secured with JWT authentication and built with input guardrails and circuit-breaker resilience patterns. It is ideal for searching proposals, contracts, reports, or internal knowledge bases.
+      </p>
+      <div class="project-impact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        Cross-encoder re-ranking widened the relevance score gap by 153x
+      </div>
+      <div class="project-stack">
+        <span class="stack-tag">Pinecone</span>
+        <span class="stack-tag">BM25</span>
+        <span class="stack-tag">Cross-encoder</span>
+        <span class="stack-tag">LangChain</span>
+        <span class="stack-tag">Claude Haiku</span>
+        <span class="stack-tag">FastAPI</span>
+        <span class="stack-tag">Docker</span>
       </div>
     </div>
+  </div>
+
+  <!-- PROJECT 3: TOURNAMENTIQ -->
+  <div class="project-card">
+    <div class="project-visual">
+      <svg width="100%" height="100%" viewBox="0 0 680 320" role="img" style="display:block;">
+        <title>TournamentIQ illustration</title>
+        <rect width="680" height="320" fill="#0a1a0f"/>
+        <rect x="80" y="40" width="520" height="240" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
+        <circle cx="340" cy="160" r="50" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
+        <line x1="340" y1="40" x2="340" y2="280" stroke="#1a4a2a" stroke-width="1.5"/>
+        <circle cx="340" cy="160" r="3" fill="#1a4a2a"/>
+        <rect x="80" y="100" width="90" height="120" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
+        <rect x="80" y="130" width="40" height="60" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
+        <rect x="510" y="100" width="90" height="120" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
+        <rect x="640" y="130" width="40" height="60" fill="none" stroke="#1a4a2a" stroke-width="1.5"/>
+        <rect x="80" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
+        <rect x="184" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
+        <rect x="288" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
+        <rect x="392" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
+        <rect x="496" y="40" width="52" height="240" fill="#0d1f12" opacity="0.5"/>
+        <rect x="96" y="56" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
+        <text x="110" y="75" fill="#1D9E75" font-size="10" font-family="monospace">ELO RATING</text>
+        <text x="110" y="95" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">1847</text>
+        <rect x="454" y="56" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
+        <text x="468" y="75" fill="#1D9E75" font-size="10" font-family="monospace">WIN PROB</text>
+        <text x="468" y="95" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">67.3%</text>
+        <rect x="96" y="212" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
+        <text x="110" y="231" fill="#1D9E75" font-size="10" font-family="monospace">POISSON λ</text>
+        <text x="110" y="251" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">2.14</text>
+        <rect x="454" y="212" width="130" height="52" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="0.5"/>
+        <text x="468" y="231" fill="#1D9E75" font-size="10" font-family="monospace">BAYESIAN ADJ</text>
+        <text x="468" y="251" fill="#e0fdf4" font-size="16" font-weight="500" font-family="monospace">+0.12</text>
+        <rect x="290" y="130" width="100" height="60" rx="4" fill="#0f2d1a" stroke="#1D9E75" stroke-width="1"/>
+        <text x="340" y="155" text-anchor="middle" fill="#4a8a6a" font-size="10" font-family="monospace">LIVE</text>
+        <text x="340" y="178" text-anchor="middle" fill="#e0fdf4" font-size="20" font-weight="500" font-family="monospace">2 — 1</text>
+        <circle cx="160" cy="130" r="5" fill="#1D9E75" opacity="0.8"/>
+        <circle cx="160" cy="160" r="5" fill="#1D9E75" opacity="0.8"/>
+        <circle cx="160" cy="190" r="5" fill="#1D9E75" opacity="0.8"/>
+        <circle cx="220" cy="110" r="5" fill="#1D9E75" opacity="0.8"/>
+        <circle cx="220" cy="160" r="5" fill="#1D9E75" opacity="0.8"/>
+        <circle cx="220" cy="210" r="5" fill="#1D9E75" opacity="0.8"/>
+        <circle cx="460" cy="130" r="5" fill="#e05050" opacity="0.8"/>
+        <circle cx="460" cy="160" r="5" fill="#e05050" opacity="0.8"/>
+        <circle cx="460" cy="190" r="5" fill="#e05050" opacity="0.8"/>
+        <circle cx="520" cy="110" r="5" fill="#e05050" opacity="0.8"/>
+        <circle cx="520" cy="160" r="5" fill="#e05050" opacity="0.8"/>
+        <circle cx="520" cy="210" r="5" fill="#e05050" opacity="0.8"/>
+      </svg>
+    </div>
+    <div class="project-body">
+      <div class="project-header">
+        <h3 class="project-name">TournamentIQ . Live Match Intelligence</h3>
+      </div>
+      <p class="project-description">
+        A live AI match intelligence platform built on 2026 FIFA World Cup data. It combines Elo ratings, a Poisson probability model with Bayesian inference, a LangChain ReAct agent, and a LangGraph tiered orchestration layer to generate narrative match intelligence briefs.
+      </p>
+      <div class="project-impact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        Elo ratings with Poisson V4, Laplace smoothing, and recency weighting
+      </div>
+      <div class="project-stack">
+        <span class="stack-tag">LangGraph</span>
+        <span class="stack-tag">LangChain ReAct</span>
+        <span class="stack-tag">Claude Haiku/Sonnet</span>
+        <span class="stack-tag">SQLAlchemy</span>
+        <span class="stack-tag">Pydantic</span>
+        <span class="stack-tag">Tavily</span>
+        <span class="stack-tag">SQLite</span>
+      </div>
+      <a href="https://github.com/Terry-Migwi/TournamentIQ" target="_blank" class="project-github-link">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </div>
+
+  <!-- PROJECT 4: ATTENDANCE TRACKER -->
+  <div class="project-card">
+    <div class="project-visual">
+      <svg width="100%" height="100%" viewBox="0 0 680 320" role="img" style="display:block;">
+        <title>Attendance Tracker illustration</title>
+        <rect width="680" height="320" fill="#0a0f1a"/>
+        <rect x="60" y="30" width="360" height="260" rx="4" fill="#0d1525" stroke="#1a2a4a" stroke-width="0.5"/>
+        <rect x="60" y="30" width="360" height="32" rx="4" fill="#0f2040"/>
+        <text x="80" y="51" fill="#7db8d0" font-size="11" font-family="monospace">Name</text>
+        <text x="200" y="51" fill="#7db8d0" font-size="11" font-family="monospace">Email</text>
+        <text x="340" y="51" fill="#7db8d0" font-size="11" font-family="monospace">Status</text>
+        <line x1="60" y1="62" x2="420" y2="62" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="60" y1="94" x2="420" y2="94" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="60" y1="126" x2="420" y2="126" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="60" y1="158" x2="420" y2="158" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="60" y1="190" x2="420" y2="190" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="60" y1="222" x2="420" y2="222" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="60" y1="254" x2="420" y2="254" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="180" y1="30" x2="180" y2="290" stroke="#1a2a4a" stroke-width="0.5"/>
+        <line x1="320" y1="30" x2="320" y2="290" stroke="#1a2a4a" stroke-width="0.5"/>
+        <text x="80" y="83" fill="#a0c8e0" font-size="11" font-family="monospace">Aisha M.</text>
+        <text x="195" y="83" fill="#4a7090" font-size="10" font-family="monospace">aisha@...</text>
+        <rect x="330" y="68" width="56" height="18" rx="3" fill="#0a2a1a"/>
+        <text x="358" y="81" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
+        <text x="80" y="115" fill="#a0c8e0" font-size="11" font-family="monospace">Brian K.</text>
+        <text x="195" y="115" fill="#4a7090" font-size="10" font-family="monospace">brian@...</text>
+        <rect x="330" y="100" width="56" height="18" rx="3" fill="#0a2a1a"/>
+        <text x="358" y="113" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
+        <rect x="60" y="126" width="360" height="32" fill="#2a0f0f" opacity="0.6"/>
+        <text x="80" y="147" fill="#e08080" font-size="11" font-family="monospace">Carol N.</text>
+        <text x="195" y="147" fill="#4a7090" font-size="10" font-family="monospace">carol@...</text>
+        <rect x="330" y="132" width="56" height="18" rx="3" fill="#2a0a0a"/>
+        <text x="358" y="145" text-anchor="middle" fill="#e05050" font-size="10" font-family="monospace">absent</text>
+        <text x="80" y="179" fill="#a0c8e0" font-size="11" font-family="monospace">David O.</text>
+        <text x="195" y="179" fill="#4a7090" font-size="10" font-family="monospace">david@...</text>
+        <rect x="330" y="164" width="56" height="18" rx="3" fill="#0a2a1a"/>
+        <text x="358" y="177" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
+        <rect x="60" y="190" width="360" height="32" fill="#2a0f0f" opacity="0.6"/>
+        <text x="80" y="211" fill="#e08080" font-size="11" font-family="monospace">Eve W.</text>
+        <text x="195" y="211" fill="#4a7090" font-size="10" font-family="monospace">eve@...</text>
+        <rect x="330" y="196" width="56" height="18" rx="3" fill="#2a0a0a"/>
+        <text x="358" y="209" text-anchor="middle" fill="#e05050" font-size="10" font-family="monospace">absent</text>
+        <text x="80" y="243" fill="#a0c8e0" font-size="11" font-family="monospace">Frank J.</text>
+        <text x="195" y="243" fill="#4a7090" font-size="10" font-family="monospace">frank@...</text>
+        <rect x="330" y="228" width="56" height="18" rx="3" fill="#0a2a1a"/>
+        <text x="358" y="241" text-anchor="middle" fill="#1D9E75" font-size="10" font-family="monospace">present</text>
+        <text x="80" y="273" fill="#2a4a6a" font-size="14" font-family="monospace">· · ·</text>
+        <text x="200" y="273" fill="#2a4a6a" font-size="14" font-family="monospace">· · ·</text>
+        <text x="340" y="273" fill="#2a4a6a" font-size="14" font-family="monospace">· · ·</text>
+        <rect x="450" y="30" width="170" height="260" rx="4" fill="#0d1525" stroke="#1a2a4a" stroke-width="0.5"/>
+        <rect x="450" y="30" width="170" height="32" rx="4" fill="#0f2040"/>
+        <text x="535" y="51" text-anchor="middle" fill="#7db8d0" font-size="11" font-family="monospace">Summary</text>
+        <text x="465" y="90" fill="#4a7090" font-size="10" font-family="monospace">Total learners</text>
+        <text x="465" y="108" fill="#a0c8e0" font-size="20" font-weight="500" font-family="monospace">100</text>
+        <line x1="450" y1="122" x2="620" y2="122" stroke="#1a2a4a" stroke-width="0.5"/>
+        <text x="465" y="142" fill="#4a7090" font-size="10" font-family="monospace">Present</text>
+        <text x="465" y="160" fill="#1D9E75" font-size="20" font-weight="500" font-family="monospace">87</text>
+        <line x1="450" y1="174" x2="620" y2="174" stroke="#1a2a4a" stroke-width="0.5"/>
+        <text x="465" y="194" fill="#4a7090" font-size="10" font-family="monospace">Absent</text>
+        <text x="465" y="212" fill="#e05050" font-size="20" font-weight="500" font-family="monospace">13</text>
+        <line x1="450" y1="226" x2="620" y2="226" stroke="#1a2a4a" stroke-width="0.5"/>
+        <text x="465" y="248" fill="#4a7090" font-size="10" font-family="monospace">Time saved</text>
+        <text x="465" y="266" fill="#1D9E75" font-size="16" font-weight="500" font-family="monospace">~2 hrs/wk</text>
+      </svg>
+    </div>
+    <div class="project-body">
+      <div class="project-header">
+        <h3 class="project-name">Attendance Tracker . Learner Attendance Automation</h3>
+      </div>
+      <p class="project-description">
+        A Python automation that tracks learner attendance. It compares a learner roster against session attendance exports, identifies absentees, and produces a clean output spreadsheet, completing the process in under 5 minutes. It reduced weekly attendance tracking from 2 hours to under 10 minutes.
+      </p>
+      <div class="project-impact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        Reduced weekly attendance tracking from 2 hours to under 10 minutes
+      </div>
+      <div class="project-stack">
+        <span class="stack-tag">Python</span>
+        <span class="stack-tag">Pandas</span>
+        <span class="stack-tag">OpenPyXL</span>
+        <span class="stack-tag">Tkinter</span>
+      </div>
+      <a href="https://github.com/Terry-Migwi/Attendance-Tracking" target="_blank" class="project-github-link">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </div>
 
   </div>
 </section>
