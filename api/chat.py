@@ -113,25 +113,28 @@ Retrieved context:
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
+    content_length = int(self.headers.get("Content-Length", 0))
+    body = self.rfile.read(content_length)
 
-        try:
-            payload  = json.loads(body)
-            messages = payload.get("messages", [])
+    try:
+        payload  = json.loads(body)
+        messages = payload.get("messages", [])
 
-            if not messages:
-                self._respond(400, {"error": "Invalid request body"})
-                return
+        if not messages:
+            self._respond(400, {"error": "Invalid request body"})
+            return
 
-            matches = embed_and_query(messages[-1]["content"])
-            context = build_context(matches)
-            reply   = call_claude(messages, context)
+        matches = embed_and_query(messages[-1]["content"])
+        context = build_context(matches)
+        reply   = call_claude(messages, context)
 
-            self._respond(200, {"reply": reply})
+        self._respond(200, {"reply": reply})
 
-        except Exception as e:
-            self._respond(500, {"error": str(e)})
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"ERROR: {error_detail}")
+        self._respond(500, {"error": str(e), "detail": error_detail})
 
     def do_OPTIONS(self):
         self._respond(200, {})
