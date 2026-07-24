@@ -658,6 +658,20 @@ nav a, nav span {
 .chat-send:hover { background: var(--gray-700); }
 .chat-send svg { width: 15px; height: 15px; color: var(--white); }
 
+.chat-msg.assistant ol {
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+
+.chat-msg.assistant li {
+  margin-bottom: 0.25rem;
+}
+
+.chat-msg.assistant strong {
+  font-weight: 600;
+  color: var(--black);
+}
+
 </style>
 </head>
 <body>
@@ -916,15 +930,14 @@ nav a, nav span {
   <div class="chat-box" id="chatBox">
     <div class="chat-header">
       <div>
-        <div class="chat-header-title">Ask about</div>
-        <div class="chat-header-sub">Projects, skills</div>
+        <div class="chat-header-title">Ask about these projects</div>
       </div>
       <button class="chat-close" onclick="toggleChat()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="chat-messages" id="chatMessages">
-      <div class="chat-msg assistant">Ask me about these projects</div>
+      <div class="chat-msg assistant">Hi, welcome to Terry's assistant. Would you like assistance with any of these projects?</div>
     </div>
     <div class="chat-input-row">
       <input type="text" class="chat-input" id="chatInput" placeholder="Ask a question..." onkeydown="if(event.key==='Enter') sendMessage()">
@@ -981,14 +994,27 @@ nav a, nav span {
   }
 
   function appendMessage(role, text) {
-    const messages = document.getElementById('chatMessages');
-    const div = document.createElement('div');
-    div.className = `chat-msg ${role}`;
+  const messages = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = `chat-msg ${role}`;
+  
+  if (role === 'assistant') {
+    div.innerHTML = text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/^\d+\.\s(.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>)/gs, '<ol>$1</ol>')
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>');
+  } else {
     div.textContent = text;
-    messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
-    return div;
   }
+  
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+  return div;
+  }
+  
 </script>
 
 </body>
