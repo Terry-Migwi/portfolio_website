@@ -41,7 +41,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         vector: vector,
-        topK: 5,
+        topK: 10,
         namespace: 'portfolio',
         includeMetadata: true
       })
