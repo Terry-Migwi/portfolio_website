@@ -79,12 +79,10 @@ Important: Denta is a messaging assistant that works over both WhatsApp and SMS 
 Do not make up any information not present in the context. Keep responses concise and professional.
 
 Portfolio overview:
-This portfolio contains four projects:
+This portfolio contains three projects:
 1. Denta - a messaging assistant with RAG and tool calling for bookings, designed for any business taking bookings or appointments over a messaging channel.
 2. Hybrid Search - a production-ready document search engine combining semantic search and keyword search with LLM answer synthesis, secured with JWT authentication.
 3. TournamentIQ - a live AI match intelligence platform built on 2026 FIFA World Cup data, combining Elo ratings, Poisson probability modelling, Bayesian inference, and LangGraph orchestration to generate narrative match intelligence briefs.
-4. Attendance Tracker - a Python automation that reduced weekly learner attendance tracking from 2 hours to under 10 minutes.
-
 Retrieved context:
 ${context}`,
         messages: messages
